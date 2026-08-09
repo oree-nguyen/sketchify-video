@@ -1,0 +1,5 @@
+node_modules/
+dist/
+public/wasm/imaging.wasm
+public/wasm/wasm_exec.js
+*.log
