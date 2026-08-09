@@ -1,46 +1,218 @@
-import { ChangeEvent, DragEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type DragEvent, type PointerEvent } from 'react'
 import { HAND_ASSETS } from './assets/hands/registry'
-import { createFrame, type Frame, type HandStyleId, type Project, type TransitionType } from './state/projectStore'
+import { EditPanel, HandPanel } from './components/EditorControls'
+import { FramePanel, HorizontalTimeline } from './components/FrameTimeline'
+import { fitRect } from './camera/cameraTimeline'
+import { ProjectPlayer } from './render/ProjectPlayer'
+import { createFrame, type Frame, type Project } from './state/projectStore'
+import { buildProjectTimeline } from './timeline/projectTimeline'
 import { analyzeImage, type Analysis } from './wasm/wasmClient'
-import { Player } from './render/Player'
-import { buildCameraTimeline, fitRect } from './camera/cameraTimeline'
 
-const transitions:{value:TransitionType;label:string}[]=[{value:'none',label:'Cắt thẳng'},{value:'zoom-morph',label:'Zoom morph'},{value:'paper-airplane',label:'Máy bay giấy'},{value:'paper-fold',label:'Gấp trang'}]
+export default function App() {
+  const [project, setProject] = useState<Project>({ frames: [], activeFrameId: null, handStyle: 'pencil', playhead: { globalTimeSec: 0 } })
+  const [analyses, setAnalyses] = useState<Record<number, Analysis>>({})
+  const [analysisStatus, setAnalysisStatus] = useState<'idle' | 'working' | 'error'>('idle')
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [horizontal, setHorizontal] = useState(false)
+  const [panel, setPanel] = useState<'hand' | 'edit'>('hand')
+  const [videoUrl, setVideoUrl] = useState<string | null>(null)
+  const [showRender, setShowRender] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
 
-export default function App(){
-  const [project,setProject]=useState<Project>({frames:[],activeFrameId:null,handStyle:'pencil'})
-  const [analyses,setAnalyses]=useState<Record<number,Analysis>>({}),[analysisStatus,setAnalysisStatus]=useState<'idle'|'working'|'error'>('idle')
-  const [isPlaying,setIsPlaying]=useState(false),[progress,setProgress]=useState(0),[horizontal,setHorizontal]=useState(false),[panel,setPanel]=useState<'hand'|'edit'>('hand'),[videoUrl,setVideoUrl]=useState<string|null>(null),[showRender,setShowRender]=useState(false)
-  const fileRef=useRef<HTMLInputElement>(null),canvasRef=useRef<HTMLCanvasElement>(null)
-  const active=project.frames.find(f=>f.id===project.activeFrameId)??null,analysis=active?analyses[active.id]??null:null
-  const total=useMemo(()=>project.frames.reduce((n,f)=>n+f.durationSec,0),[project.frames])
-  const supported='MediaRecorder' in window
-  useEffect(()=>()=>{if(videoUrl)URL.revokeObjectURL(videoUrl)},[videoUrl])
-  useEffect(()=>{const snapshot={activeFrameId:project.activeFrameId,handStyle:project.handStyle,frames:project.frames.map(f=>({id:f.id,name:f.name,settings:f.settings,pinnedBlockIds:f.pinnedBlockIds,transitionToNext:f.transitionToNext,durationSec:f.durationSec,dirty:f.dirty}))};localStorage.setItem('sketchify-video-project',JSON.stringify(snapshot))},[project])
-  const inspect=async(frameId:number,url:string,settings:Record<string,unknown>)=>{setAnalysisStatus('working');try{const image=new Image();image.src=url;await image.decode();const scale=Math.min(1,Number(settings.workingWidth)/image.naturalWidth),canvas=document.createElement('canvas');canvas.width=Math.round(image.naturalWidth*scale);canvas.height=Math.round(image.naturalHeight*scale);const ctx=canvas.getContext('2d',{willReadFrequently:true});if(!ctx)throw Error('canvas');ctx.drawImage(image,0,0,canvas.width,canvas.height);const result=await analyzeImage(new Uint8Array(ctx.getImageData(0,0,canvas.width,canvas.height).data),canvas.width,canvas.height,settings as Record<string,number>);setAnalyses(a=>({...a,[frameId]:result}));setProject(p=>({...p,frames:p.frames.map(f=>f.id===frameId?{...f,analysis:result,dirty:false}:f)}));setAnalysisStatus('idle')}catch{setAnalysisStatus('error')}}
-  const addFile=(file?:File)=>{if(!file?.type.startsWith('image/'))return;const id=Date.now(),frame=createFrame(file,id);setShowRender(false);setProject(p=>({...p,frames:[...p.frames,frame],activeFrameId:id}));void inspect(id,frame.sourceUrl,frame.settings as unknown as Record<string,unknown>)}
-  const selectFrame=(id:number)=>{setShowRender(false);setProject(p=>({...p,activeFrameId:id}));setPanel('edit')}
-  const reorder=(from:number,to:number)=>setProject(p=>{const frames=[...p.frames],item=frames.splice(from,1)[0];frames.splice(to,0,item);return{...p,frames}})
-  useEffect(()=>{const handler=(event:Event)=>{const detail=(event as CustomEvent<{from:number;to:number}>).detail;reorder(detail.from,detail.to)};window.addEventListener('sketchify-reorder',handler);return()=>window.removeEventListener('sketchify-reorder',handler)},[])
-  const updateActive=(patch:Partial<Frame>)=>setProject(p=>({...p,frames:p.frames.map(f=>f.id===p.activeFrameId?{...f,...patch,dirty:'settings' in patch?true:f.dirty}:f)}))
-  useEffect(()=>{if(!active?.dirty)return;const id=window.setTimeout(()=>void inspect(active.id,active.sourceUrl,active.settings as unknown as Record<string,unknown>),250);return()=>window.clearTimeout(id)},[active?.id,active?.dirty,active?.sourceUrl,active?.settings])
-  const play=async(record:boolean)=>{if(!active||!analysis||!canvasRef.current||(record&&!supported))return;setShowRender(true);setIsPlaying(true);setProgress(0);if(project.frames.length>1){const blob=await playProject(project.frames,analyses,project.handStyle,canvasRef.current,record,setProgress);setIsPlaying(false);if(blob){if(videoUrl)URL.revokeObjectURL(videoUrl);setVideoUrl(URL.createObjectURL(blob))}return}const result=await new Player(canvasRef.current,{sourceUrl:active.sourceUrl,drawDurationSec:active.settings.drawDurationSec,holdDurationSec:active.settings.holdDurationSec,fps:active.settings.fps,analysis,hand:HAND_ASSETS[project.handStyle],settings:active.settings,pinnedBlockIds:active.pinnedBlockIds}).play(record,setProgress);setIsPlaying(false);if(result.blob){if(videoUrl)URL.revokeObjectURL(videoUrl);setVideoUrl(URL.createObjectURL(result.blob))}}
-  const onFile=(e:ChangeEvent<HTMLInputElement>)=>{addFile(e.target.files?.[0]);e.target.value=''},onDrop=(e:DragEvent)=>{e.preventDefault();addFile(e.dataTransfer.files[0])}
-  const pointer=(e:React.PointerEvent<HTMLElement>)=>{if(matchMedia('(prefers-reduced-motion: reduce)').matches||!matchMedia('(hover: hover)').matches)return;const r=e.currentTarget.getBoundingClientRect();e.currentTarget.style.setProperty('--spot-x',`${e.clientX-r.left}px`);e.currentTarget.style.setProperty('--spot-y',`${e.clientY-r.top}px`)}
-  return <main className="app-shell" onPointerMove={pointer}><header className="topbar"><div className="brand"><span className="brand-mark">S</span><span>Sketchify <b>Video</b></span><small>LOCAL EDITOR</small></div><div className="top-actions"><button className="quiet" disabled={!active||isPlaying} onClick={()=>void play(false)}>Xem thử</button><button className="export" disabled={!active||!supported||isPlaying} onClick={()=>void play(true)}>Tạo .webm</button>{videoUrl&&<a className="quiet" href={videoUrl} download="sketchify-video.webm">Tải video</a>}{!supported&&<small>Trình duyệt không hỗ trợ MediaRecorder. Dùng Chrome hoặc Edge.</small>}</div></header>
-    <section className={`workspace ${horizontal?'is-horizontal':''}`}>{!horizontal&&<FramePanel frames={project.frames} activeId={active?.id} select={selectFrame} upload={()=>fileRef.current?.click()} drop={onDrop} horizontal={()=>setHorizontal(true)}/>}<section className="stage"><div className="stage-topline"><span>{active?`KHUNG ${project.frames.findIndex(f=>f.id===active.id)+1}`:'SẴN SÀNG'}</span><span>{analysisStatus==='working'?'Đang phân tích bằng WASM…':analysis?`${analysis.blocks.length} khối đã tách`:'Thêm ảnh để bắt đầu'}</span></div><div className={`preview ${showRender?'has-render':''}`}><canvas ref={canvasRef} className="render-canvas" aria-label="Canvas xem thử"/>{active&&!showRender&&<div className="analyzed-image"><img className="source-image" src={active.sourceUrl} alt="Khung hiện tại"/>{analysis&&<div className="block-overlay">{analysis.blocks.map(b=><span className={`block ${b.kind}`} key={b.id} onClick={()=>{if(active.settings.orderMode==='custom'){const order=active.settings.customOrder.filter(id=>id!==b.id);updateActive({settings:{...active.settings,customOrder:[...order,b.id]}})}if(active.settings.camera.mode==='B-manual-keyframe'){const crop=fitRect(b.bbox,analysis.img.w/analysis.img.h,active.settings.camera.zoomPadding,analysis.img.w,analysis.img.h,active.settings.camera.zoomLevel);const manualKeyframes=active.settings.camera.manualKeyframes.filter(k=>k.blockId!==b.id);updateActive({settings:{...active.settings,camera:{...active.settings.camera,manualKeyframes:[...manualKeyframes,{blockId:b.id,crop}]}}})}}} style={{left:`${b.bbox.x/analysis.img.w*100}%`,top:`${b.bbox.y/analysis.img.h*100}%`,width:`${b.bbox.w/analysis.img.w*100}%`,height:`${b.bbox.h/analysis.img.h*100}%`}}><b>{active.settings.orderMode==='custom'?(active.settings.customOrder.indexOf(b.id)+1||'·'):b.id+1}</b></span>)}</div>}</div>}{!active&&<div className="empty-preview"><strong>Biến ảnh thành câu chuyện được vẽ</strong><p>Kéo ảnh vào timeline hoặc tải ảnh lên.</p><button className="export" onClick={()=>fileRef.current?.click()}>Tải ảnh lên</button></div>}</div><div className="transport"><button disabled={isPlaying} onClick={()=>setProgress(Math.max(0,progress-10))}>−10</button><button className="play" disabled={isPlaying||!active} onClick={()=>void play(false)}>{isPlaying?'Ⅱ':'▶'}</button><button disabled={isPlaying} onClick={()=>setProgress(Math.min(total,progress+10))}>+10</button><span className="duration">{formatTime(progress)} / {formatTime(total)}</span></div><input aria-label="Playhead" className="scrubber" type="range" min="0" max={Math.max(total,1)} step=".1" value={Math.min(progress,total)} onChange={e=>setProgress(Number(e.target.value))}/>{horizontal&&<HorizontalTimeline frames={project.frames} activeId={active?.id} select={selectFrame} upload={()=>fileRef.current?.click()} drop={onDrop} vertical={()=>setHorizontal(false)}/>}</section><aside className="inspector"><nav className="tool-rail"><button className={panel==='hand'?'active':''} onClick={()=>setPanel('hand')} aria-label="Bàn tay">✎</button>{active&&<button className={panel==='edit'?'active':''} onClick={()=>setPanel('edit')} aria-label="Chỉnh sửa">☷</button>}</nav><div className="inspector-body">{panel==='hand'||!active?<HandPanel style={project.handStyle} setStyle={id=>setProject(p=>({...p,handStyle:id}))}/>:<EditPanel frame={active} analysis={analysis} last={project.frames.at(-1)?.id===active.id} update={updateActive}/>}</div></aside></section><input ref={fileRef} hidden type="file" accept="image/png,image/jpeg" onChange={onFile}/></main>
+  const active = project.frames.find((frame) => frame.id === project.activeFrameId) ?? null
+  const analysis = active ? analyses[active.id] ?? null : null
+  const timeline = useMemo(() => buildProjectTimeline(project), [project.frames])
+  const total = timeline.totalDurationSec
+  const progress = project.playhead.globalTimeSec
+  const rangeProgress = total ? progress / total * 100 : 0
+  const supported = 'MediaRecorder' in window
+
+  const setProgress = (globalTimeSec: number) => setProject((current) => ({
+    ...current,
+    playhead: { globalTimeSec: Math.max(0, Math.min(buildProjectTimeline(current).totalDurationSec, globalTimeSec)) },
+  }))
+
+  useEffect(() => () => { if (videoUrl) URL.revokeObjectURL(videoUrl) }, [videoUrl])
+  useEffect(() => {
+    const snapshot = {
+      activeFrameId: project.activeFrameId,
+      handStyle: project.handStyle,
+      frames: project.frames.map((frame) => ({
+        id: frame.id,
+        name: frame.name,
+        settings: frame.settings,
+        pinnedBlockIds: frame.pinnedBlockIds,
+        transitionToNext: frame.transitionToNext,
+        durationSec: frame.durationSec,
+        dirty: frame.dirty,
+      })),
+    }
+    localStorage.setItem('sketchify-video-project', JSON.stringify(snapshot))
+  }, [project.frames, project.activeFrameId, project.handStyle])
+
+  const inspect = async (frameId: number, url: string, settings: Record<string, unknown>): Promise<Analysis | null> => {
+    setAnalysisStatus('working')
+    try {
+      const image = new Image()
+      image.src = url
+      await image.decode()
+      const scale = Math.min(1, Number(settings.workingWidth) / image.naturalWidth)
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.round(image.naturalWidth * scale)
+      canvas.height = Math.round(image.naturalHeight * scale)
+      const context = canvas.getContext('2d', { willReadFrequently: true })
+      if (!context) throw new Error('Không tạo được Canvas2D')
+      context.drawImage(image, 0, 0, canvas.width, canvas.height)
+      const rgba = new Uint8Array(context.getImageData(0, 0, canvas.width, canvas.height).data)
+      const result = await analyzeImage(rgba, canvas.width, canvas.height, settings as Record<string, number>)
+      setAnalyses((current) => ({ ...current, [frameId]: result }))
+      setProject((current) => ({ ...current, frames: current.frames.map((frame) => frame.id === frameId ? { ...frame, analysis: result, dirty: false } : frame) }))
+      setAnalysisStatus('idle')
+      return result
+    } catch {
+      setAnalysisStatus('error')
+      return null
+    }
+  }
+
+  const addFile = (file?: File) => {
+    if (!file?.type.startsWith('image/')) return
+    const id = Date.now()
+    const frame = createFrame(file, id)
+    setShowRender(false)
+    setProject((current) => ({ ...current, frames: [...current.frames, frame], activeFrameId: id }))
+    void inspect(id, frame.sourceUrl, frame.settings as unknown as Record<string, unknown>)
+  }
+
+  const selectFrame = (id: number) => {
+    setShowRender(false)
+    setProject((current) => ({ ...current, activeFrameId: id }))
+    setPanel('edit')
+  }
+
+  useEffect(() => {
+    const reorder = (event: Event) => {
+      const { from, to } = (event as CustomEvent<{ from: number; to: number }>).detail
+      setProject((current) => {
+        const frames = [...current.frames]
+        const item = frames.splice(from, 1)[0]
+        frames.splice(to, 0, item)
+        return { ...current, frames }
+      })
+    }
+    window.addEventListener('sketchify-reorder', reorder)
+    return () => window.removeEventListener('sketchify-reorder', reorder)
+  }, [])
+
+  const updateActive = (patch: Partial<Frame>) => setProject((current) => ({
+    ...current,
+    frames: current.frames.map((frame) => frame.id === current.activeFrameId ? { ...frame, ...patch, dirty: 'settings' in patch ? true : frame.dirty } : frame),
+  }))
+
+  useEffect(() => {
+    if (!active?.dirty) return
+    const timeout = window.setTimeout(() => void inspect(active.id, active.sourceUrl, active.settings as unknown as Record<string, unknown>), 250)
+    return () => window.clearTimeout(timeout)
+  }, [active?.id, active?.dirty, active?.sourceUrl, active?.settings])
+
+  const play = async (record: boolean) => {
+    if (!active || !canvasRef.current || (record && !supported)) return
+    setShowRender(true)
+    setIsPlaying(true)
+    setProgress(0)
+    const readyAnalyses = { ...analyses }
+    for (const frame of project.frames) {
+      if (!readyAnalyses[frame.id] || frame.dirty) {
+        const result = await inspect(frame.id, frame.sourceUrl, frame.settings as unknown as Record<string, unknown>)
+        if (!result) { setIsPlaying(false); return }
+        readyAnalyses[frame.id] = result
+      }
+    }
+    try {
+      const result = await new ProjectPlayer(canvasRef.current, project, readyAnalyses).play(record, setProgress)
+      if (result.blob) {
+        if (videoUrl) URL.revokeObjectURL(videoUrl)
+        setVideoUrl(URL.createObjectURL(result.blob))
+      }
+    } finally {
+      setIsPlaying(false)
+    }
+  }
+
+  const handleFile = (event: ChangeEvent<HTMLInputElement>) => { addFile(event.target.files?.[0]); event.target.value = '' }
+  const handleDrop = (event: DragEvent) => { event.preventDefault(); addFile(event.dataTransfer.files[0]) }
+  const handleSpotlight = (event: PointerEvent<HTMLElement>) => {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches || !matchMedia('(hover: hover)').matches) return
+    const bounds = event.currentTarget.getBoundingClientRect()
+    event.currentTarget.style.setProperty('--spot-x', `${event.clientX - bounds.left}px`)
+    event.currentTarget.style.setProperty('--spot-y', `${event.clientY - bounds.top}px`)
+  }
+
+  return <main className="app-shell">
+    <header className="topbar">
+      <div className="brand"><span className="brand-mark">S</span><span>Sketchify <b>Video</b></span><small>LOCAL EDITOR</small></div>
+      <div className="top-actions">
+        <button className="quiet" disabled={!active || isPlaying} onClick={() => void play(false)}>Xem thử</button>
+        <button className="export" disabled={!active || !supported || isPlaying} onClick={() => void play(true)}>Tạo .webm</button>
+        {videoUrl && <a className="quiet" href={videoUrl} download="sketchify-video.webm">Tải video</a>}
+        {!supported && <small>Trình duyệt không hỗ trợ MediaRecorder. Dùng Chrome hoặc Edge.</small>}
+      </div>
+    </header>
+
+    <section className={`workspace ${horizontal ? 'is-horizontal' : ''}`}>
+      {!horizontal && <FramePanel frames={project.frames} activeId={active?.id} select={selectFrame} upload={() => fileRef.current?.click()} drop={handleDrop} horizontal={() => setHorizontal(true)} onPointerMove={handleSpotlight} />}
+
+      <section className="stage spotlight-surface" onPointerMove={handleSpotlight}>
+        <div className="stage-topline"><span>{active ? `KHUNG ${project.frames.findIndex((frame) => frame.id === active.id) + 1}` : 'SẴN SÀNG'}</span><span>{analysisStatus === 'working' ? 'Đang phân tích bằng WASM…' : analysis ? `${analysis.blocks.length} khối đã tách` : analysisStatus === 'error' ? 'Không thể phân tích ảnh' : 'Thêm ảnh để bắt đầu'}</span></div>
+        <div className={`preview ${showRender ? 'has-render' : ''}`}>
+          <canvas ref={canvasRef} className="render-canvas" aria-label="Canvas xem thử" />
+          {active && !showRender && <div className="analyzed-image">
+            <img className="source-image" src={active.sourceUrl} alt="Khung hiện tại" />
+            {analysis && <div className="block-overlay">{analysis.blocks.map((block) => <span
+              className={`block ${block.kind}`}
+              key={block.id}
+              onClick={() => {
+                if (active.settings.orderMode === 'custom') {
+                  const order = active.settings.customOrder.filter((id) => id !== block.id)
+                  updateActive({ settings: { ...active.settings, customOrder: [...order, block.id] } })
+                }
+                if (active.settings.camera.mode === 'B-manual-keyframe') {
+                  const crop = fitRect(block.bbox, analysis.img.w / analysis.img.h, active.settings.camera.zoomPadding, analysis.img.w, analysis.img.h, active.settings.camera.zoomLevel)
+                  const manualKeyframes = active.settings.camera.manualKeyframes.filter((key) => key.blockId !== block.id)
+                  updateActive({ settings: { ...active.settings, camera: { ...active.settings.camera, manualKeyframes: [...manualKeyframes, { blockId: block.id, crop }] } } })
+                }
+              }}
+              style={{ left: `${block.bbox.x / analysis.img.w * 100}%`, top: `${block.bbox.y / analysis.img.h * 100}%`, width: `${block.bbox.w / analysis.img.w * 100}%`, height: `${block.bbox.h / analysis.img.h * 100}%` }}
+            ><b>{active.settings.orderMode === 'custom' ? active.settings.customOrder.indexOf(block.id) + 1 || '·' : block.id + 1}</b></span>)}</div>}
+          </div>}
+          {!active && <div className="empty-preview"><strong>Biến ảnh thành câu chuyện được vẽ</strong><p>Kéo ảnh vào timeline hoặc tải ảnh lên.</p><button className="export" onClick={() => fileRef.current?.click()}>Tải ảnh lên</button></div>}
+        </div>
+        <div className="transport">
+          <button disabled={isPlaying} onClick={() => setProgress(Math.max(0, progress - 10))}>−10</button>
+          <button className="play" disabled={isPlaying || !active} onClick={() => void play(false)}>{isPlaying ? 'Ⅱ' : '▶'}</button>
+          <button disabled={isPlaying} onClick={() => setProgress(Math.min(total, progress + 10))}>+10</button>
+          <span className="duration">{formatTime(progress)} / {formatTime(total)}</span>
+        </div>
+        <input aria-label="Playhead" className="scrubber range-input" type="range" min="0" max={Math.max(total, 1)} step=".1" value={Math.min(progress, total)} style={{ '--range-progress': `${rangeProgress}%` } as CSSProperties} onChange={(event) => setProgress(Number(event.target.value))} />
+        {horizontal && <HorizontalTimeline frames={project.frames} activeId={active?.id} select={selectFrame} upload={() => fileRef.current?.click()} drop={handleDrop} vertical={() => setHorizontal(false)} />}
+      </section>
+
+      <aside className="inspector spotlight-surface" onPointerMove={handleSpotlight}>
+        <nav className="tool-rail">
+          <button className={panel === 'hand' ? 'active' : ''} onClick={() => setPanel('hand')} aria-label="Bàn tay" title="Bàn tay">✎</button>
+          {active && <button className={panel === 'edit' ? 'active' : ''} onClick={() => setPanel('edit')} aria-label="Chỉnh sửa" title="Chỉnh sửa">☷</button>}
+        </nav>
+        <div className="inspector-body">{panel === 'hand' || !active
+          ? <HandPanel style={project.handStyle} setStyle={(handStyle) => setProject((current) => ({ ...current, handStyle }))} />
+          : <EditPanel frame={active} analysis={analysis} last={project.frames.at(-1)?.id === active.id} update={updateActive} />}
+        </div>
+      </aside>
+    </section>
+    <input ref={fileRef} hidden type="file" accept="image/png,image/jpeg" onChange={handleFile} />
+  </main>
 }
-function FramePanel({frames,activeId,select,reorder=()=>{},upload,drop,horizontal}:{frames:Frame[];activeId?:number;select:(id:number)=>void;reorder?:(from:number,to:number)=>void;upload:()=>void;drop:(e:DragEvent)=>void;horizontal:()=>void}){const [drag,setDrag]=useState<number|null>(null),nodes=useRef(new Map<number,HTMLButtonElement>()),before=useRef(new Map<number,DOMRect>());const capture=()=>{before.current=new Map([...nodes.current].map(([id,node])=>[id,node.getBoundingClientRect()]))};const flip=()=>requestAnimationFrame(()=>{for(const [id,node]of nodes.current){const oldRect=before.current.get(id),now=node.getBoundingClientRect();if(!oldRect)continue;const dx=oldRect.left-now.left,dy=oldRect.top-now.top;if(!dx&&!dy)continue;node.style.transition='transform 0s';node.style.transform='translate('+dx+'px,'+dy+'px)';requestAnimationFrame(()=>{node.style.transition='transform 180ms cubic-bezier(.2,.8,.2,1)';node.style.transform='translate(0,0)'})}});return <aside className="frame-panel"><div className="panel-heading"><span>KHUNG HÌNH</span><small>{frames.length} / ∞</small></div><div className="frame-stack">{frames.map((f,i)=><button ref={node=>{if(node)nodes.current.set(f.id,node);else nodes.current.delete(f.id)}} key={f.id} draggable onDragStart={()=>{capture();setDrag(i)}} onDragOver={e=>e.preventDefault()} onDrop={()=>{if(drag!==null&&drag!==i){reorder(drag,i);window.dispatchEvent(new CustomEvent('sketchify-reorder',{detail:{from:drag,to:i}}));flip()}setDrag(null)}} className={'frame-card '+(f.id===activeId?'selected':'')} onClick={()=>select(f.id)}><span className="frame-index">{String(i+1).padStart(2,'0')}</span><img src={f.sourceUrl} alt={f.name}/><span>{f.name}{f.dirty?' · đang cập nhật':''}</span></button>)}<UploadCard number={frames.length+1} upload={upload} drop={drop}/></div><button className="timeline-switch" onClick={horizontal}>↔ Chuyển timeline sang ngang</button></aside>}
-function HorizontalTimeline({frames,activeId,select,upload,drop,vertical}:{frames:Frame[];activeId?:number;select:(id:number)=>void;upload:()=>void;drop:(e:DragEvent)=>void;vertical:()=>void}){return <div className="horizontal-timeline"><div className="panel-heading"><span>TIMELINE</span><button onClick={vertical}>Đổi sang dọc</button></div><div className="horizontal-frames">{frames.map((f,i)=><button className={`strip-frame ${f.id===activeId?'selected':''}`} key={f.id} onClick={()=>select(f.id)}><img src={f.sourceUrl} alt=""/><span>#{i+1}</span></button>)}<UploadCard number={frames.length+1} upload={upload} drop={drop}/></div></div>}
-function UploadCard({number,upload,drop}:{number:number;upload:()=>void;drop:(e:DragEvent)=>void}){return <button className="upload-card" onClick={upload} onDragOver={e=>e.preventDefault()} onDrop={drop}><strong>+</strong><span>Khung hình #{number}</span><small>Kéo thả hoặc tải lên</small></button>}
-function HandPanel({style,setStyle}:{style:HandStyleId;setStyle:(id:HandStyleId)=>void}){return <><div className="inspector-title"><span>CÔNG CỤ</span><h2>Bàn tay</h2><p>Một kiểu tay cho toàn bộ video.</p></div><div className="hand-grid">{(Object.entries(HAND_ASSETS) as [HandStyleId,typeof HAND_ASSETS[HandStyleId]][]).map(([id,h])=><button className={`hand-card ${style===id?'selected':''}`} key={id} onClick={()=>setStyle(id)}><img src={h.src} alt=""/><span>{h.label}</span></button>)}</div></>}
-function EditPanel({frame,analysis,last,update}:{frame:Frame;analysis:Analysis|null;last:boolean;update:(p:Partial<Frame>)=>void}){const set=(p:Partial<typeof frame.settings>)=>update({settings:{...frame.settings,...p}}),cam=analysis?buildCameraTimeline(frame.settings,analysis.blocks,analysis.units,analysis.img.w,analysis.img.h,frame.pinnedBlockIds):null;return <><div className="inspector-title"><span>ĐỊNH DẠNG</span><h2>Khung hình</h2><p>{frame.name}</p></div><section className="form-group"><label>Thời gian vẽ <output>{frame.settings.drawDurationSec}s</output></label><input type="range" min="2" max="20" value={frame.settings.drawDurationSec} onChange={e=>{const v=Number(e.target.value);set({drawDurationSec:v});update({durationSec:v+frame.settings.holdDurationSec})}}/></section><section className="form-group"><label>Giữ khung <output>{frame.settings.holdDurationSec}s</output></label><input type="range" min="0" max="8" value={frame.settings.holdDurationSec} onChange={e=>{const v=Number(e.target.value);set({holdDurationSec:v});update({durationSec:v+frame.settings.drawDurationSec})}}/></section><section className="form-group"><label>Gộp vùng <output>{frame.settings.mergeRadius}px</output></label><input type="range" min="0" max="40" value={frame.settings.mergeRadius} onChange={e=>set({mergeRadius:Number(e.target.value)})}/><small className="field-hint">0 giữ nét rời; 40 gộp vật thể gần nhau.</small></section><section className="form-group"><label>Thứ tự vẽ</label><select value={frame.settings.orderMode} onChange={e=>set({orderMode:e.target.value as typeof frame.settings.orderMode})}>{[['auto-row','Tự động theo hàng'],['ltr','Trái → phải'],['rtl','Phải → trái'],['ttb','Trên → dưới'],['btt','Dưới → trên'],['custom','Tự chọn']].map(([v,l])=><option value={v} key={v}>{l}</option>)}</select></section><section className="form-group"><label>Camera</label><div className="camera-options">{(['off','A-auto-follow','B-manual-keyframe','C-two-stage','D-hybrid'] as const).map(mode=><label className={`camera-card ${frame.settings.camera.mode===mode?'chosen':''}`} key={mode}><input type="radio" name={`camera-${frame.id}`} checked={frame.settings.camera.mode===mode} disabled={mode==='B-manual-keyframe'&&frame.settings.orderMode!=='custom'} onChange={()=>set({camera:{...frame.settings.camera,mode}})}/><span>{mode}</span></label>)}</div>{frame.settings.camera.mode==='B-manual-keyframe'&&frame.settings.orderMode!=='custom'&&<small className="field-hint">B cần Thứ tự vẽ = Tự chọn.</small>}{cam?.fellBack&&<div className="camera-warning">{cam.reason}</div>}</section><section className="form-group"><label><span>Zoom trang</span><input type="checkbox" checked={frame.settings.pageZoom.enabled} onChange={e=>set({pageZoom:{...frame.settings.pageZoom,enabled:e.target.checked}})}/></label>{frame.settings.pageZoom.enabled&&<><label>Cách gộp trang</label><select value={frame.settings.pageZoom.mode} onChange={e=>set({pageZoom:{...frame.settings.pageZoom,mode:e.target.value as typeof frame.settings.pageZoom.mode}})}><option value="auto-rows" disabled={frame.settings.orderMode!=='auto-row'}>Theo hàng tự động</option><option value="manual">Tự gán thủ công</option></select>{frame.settings.orderMode!=='auto-row'&&frame.settings.pageZoom.mode==='auto-rows'&&<small className="field-hint">Theo hàng chỉ dùng khi thứ tự tự động theo hàng.</small>}<label>Thời lượng chuyển <output>{frame.settings.pageZoom.transitionSec.toFixed(1)}s</output></label><input type="range" min=".4" max="3" step=".1" value={frame.settings.pageZoom.transitionSec} onChange={e=>set({pageZoom:{...frame.settings.pageZoom,transitionSec:Number(e.target.value)}})}/></>}</section>{analysis&&<section className="form-group"><label>Đẩy vật thể vào khung</label>{analysis.blocks.map(b=><label className="push-row" key={b.id}><input type="checkbox" checked={frame.settings.objectPushEntry.selectedBlockIds.includes(b.id)} onChange={e=>{const ids=frame.settings.objectPushEntry.selectedBlockIds;set({objectPushEntry:{...frame.settings.objectPushEntry,selectedBlockIds:e.target.checked?[...ids,b.id]:ids.filter(id=>id!==b.id)}})}}/><span>#{b.id+1} · {b.kind}</span></label>)}</section>}{analysis&&<section className="form-group"><label>Ghim camera cận cảnh</label>{analysis.blocks.map(b=><label className="push-row" key={`pin-${b.id}`}><input type="checkbox" checked={frame.pinnedBlockIds.includes(b.id)} onChange={e=>update({pinnedBlockIds:e.target.checked?[...frame.pinnedBlockIds,b.id]:frame.pinnedBlockIds.filter(id=>id!==b.id)})}/><span>Khối #{b.id+1}</span></label>)}</section>}<section className="form-group"><label>Cử chỉ tay kết thúc</label><input type="checkbox" checked={frame.settings.handPushEnding.enabled} disabled={frame.settings.holdDurationSec<1.2} onChange={e=>set({handPushEnding:{enabled:e.target.checked}})}/><small className="field-hint">{frame.settings.holdDurationSec<1.2?'Cần giữ khung ít nhất 1,2 giây.':'Hiện trong 0,8 giây đầu của pha giữ khung.'}</small></section>{!last&&<section className="transition-group"><h3>Chuyển sang khung kế</h3>{transitions.map(t=><button className={`transition-option ${frame.transitionToNext.type===t.value?'chosen':''}`} key={t.value} onClick={()=>update({transitionToNext:{...frame.transitionToNext,type:t.value}})}><span><b>{t.label}</b></span></button>)}</section>}</>}
-function formatTime(s:number){return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(Math.floor(s%60)).padStart(2,'0')}`}
-async function playProject(frames:Frame[],analyses:Record<number,Analysis>,handStyle:HandStyleId,canvas:HTMLCanvasElement,record:boolean,onProgress:(s:number)=>void){
-  const chunks:BlobPart[]=[];let recorder:MediaRecorder|undefined
-  if(record&&'MediaRecorder'in window){const mime=['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm',''].find(t=>!t||MediaRecorder.isTypeSupported(t))??'';recorder=new MediaRecorder(canvas.captureStream(30),mime?{mimeType:mime}:undefined);recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};recorder.start(100)}
-  let elapsed=0
-  for(let i=0;i<frames.length;i++){const frame=frames[i],analysis=analyses[frame.id];if(!analysis)continue;const prev=i?frames[i-1].transitionToNext.type==='none'?0:frames[i-1].transitionToNext.durationSec/2:0,next=frames[i+1]&&frame.transitionToNext.type!=='none'?frame.transitionToNext.durationSec/2:0,hold=Math.max(0,frame.settings.holdDurationSec-prev-next),result=await new Player(canvas,{sourceUrl:frame.sourceUrl,drawDurationSec:frame.settings.drawDurationSec,holdDurationSec:hold,fps:frame.settings.fps,analysis,hand:HAND_ASSETS[handStyle],settings:frame.settings,pinnedBlockIds:frame.pinnedBlockIds}).play(false,s=>onProgress(elapsed+s));elapsed+=frame.settings.drawDurationSec+hold
-    const upcoming=frames[i+1];if(upcoming&&frame.transitionToNext.type!=='none'){const image=new Image();image.src=upcoming.sourceUrl;await image.decode();const ctx=canvas.getContext('2d')!,from=ctx.getImageData(0,0,canvas.width,canvas.height),scratch=document.createElement('canvas');scratch.width=canvas.width;scratch.height=canvas.height;scratch.getContext('2d')!.putImageData(from,0,0);const start=performance.now(),duration=frame.transitionToNext.durationSec*1000;await new Promise<void>(resolve=>{const tick=(now:number)=>{const q=Math.min(1,(now-start)/duration);ctx.clearRect(0,0,canvas.width,canvas.height);ctx.drawImage(scratch,0,0);if(frame.transitionToNext.type==='paper-airplane'){ctx.save();ctx.globalAlpha=Math.min(1,q+.15);ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(canvas.width*q,canvas.height*.5);ctx.lineTo(0,canvas.height);ctx.closePath();ctx.clip();ctx.drawImage(image,0,0,canvas.width,canvas.height);ctx.restore()}else if(frame.transitionToNext.type==='paper-fold'){ctx.save();ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(canvas.width,0);ctx.lineTo(canvas.width*q,canvas.height);ctx.lineTo(0,canvas.height);ctx.closePath();ctx.clip();ctx.drawImage(image,0,0,canvas.width,canvas.height);ctx.restore()}else{ctx.globalAlpha=q;ctx.drawImage(image,0,0,canvas.width,canvas.height);ctx.globalAlpha=1}if(q<1)requestAnimationFrame(tick);else resolve()};requestAnimationFrame(tick)});elapsed+=duration/1000}}
-  if(!recorder)return undefined;await new Promise<void>(resolve=>{recorder!.onstop=()=>resolve();recorder!.stop()});return new Blob(chunks,{type:recorder.mimeType||'video/webm'})
+
+function formatTime(seconds: number) {
+  return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`
 }

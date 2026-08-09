@@ -19,6 +19,7 @@ export interface Project {
   frames: Frame[]
   activeFrameId: number | null
   handStyle: HandStyleId
+  playhead: { globalTimeSec: number }
 }
 
 export function createFrame(file: File, id: number): Frame {

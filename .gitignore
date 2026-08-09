@@ -1,5 +1,7 @@
 node_modules/
 dist/
-public/wasm/imaging.wasm
-public/wasm/wasm_exec.js
+public/wasm/
+.claude/
+.tmp-*
 *.log
+*.tsbuildinfo
