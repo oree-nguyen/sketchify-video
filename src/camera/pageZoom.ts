@@ -51,7 +51,7 @@ function rowGroups(blocks: Block[]): number[][] {
   return groups
 }
 
-export function buildPageZoomKeys(blocks: Block[], units: DrawUnit[], settings: FrameSettings, w: number, h: number): CamKey[] {
+export function buildPageZoomKeys(blocks: Block[], units: DrawUnit[], settings: FrameSettings, w: number, h: number, drawDurationSec = 1): CamKey[] {
   if (!settings.pageZoom.enabled) return []
   const pages = buildPages(blocks, units, settings)
   if (pages.length < 2) return []
@@ -60,7 +60,7 @@ export function buildPageZoomKeys(blocks: Block[], units: DrawUnit[], settings: 
   for (let index = 0; index < pages.length - 1; index++) {
     const current = pages[index]
     const next = pages[index + 1]
-    const half = settings.pageZoom.transitionSec / (2 * Math.max(0.001, settings.drawDurationSec))
+    const half = settings.pageZoom.transitionSec / (2 * Math.max(0.001, drawDurationSec))
     const middle = Math.min(current.t1, next.t0)
     out.push(
       { t: Math.max(current.t0, middle - half), crop: fitRect(current.rect, aspect, settings.pageZoom.padding, w, h, settings.camera.zoomLevel), easing: 'easeInOutCubic', role: 'page' },

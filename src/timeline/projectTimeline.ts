@@ -1,4 +1,4 @@
-import type { Frame, Project, TransitionType } from '../state/projectStore'
+import { frameDurationSec, type Project, type TransitionType } from '../state/projectStore'
 
 export interface ProjectSegment {
   frameId: number
@@ -27,9 +27,9 @@ export function buildProjectTimeline(project: Pick<Project, 'frames'>): ProjectT
   let cursor = 0
   const segments = project.frames.map((frame, frameIndex) => {
     const next = project.frames[frameIndex + 1]
-    const durationSec = frame.settings.drawDurationSec + frame.settings.holdDurationSec
+    const durationSec = frameDurationSec(frame)
     const transitionDuration = next && frame.transitionToNext.type !== 'none'
-      ? Math.min(frame.transitionToNext.durationSec, durationSec, next.settings.drawDurationSec + next.settings.holdDurationSec)
+      ? Math.min(frame.transitionToNext.durationSec, durationSec, frameDurationSec(next))
       : 0
     const segment: ProjectSegment = {
       frameId: frame.id,
@@ -70,8 +70,4 @@ export function projectTimeAt(timeline: ProjectTimeline, globalTimeSec: number):
   }
   const segment = [...timeline.segments].reverse().find((candidate) => time >= candidate.startSec) ?? timeline.segments[0]
   return { segment, localTimeSec: Math.max(0, Math.min(segment.durationSec, time - segment.startSec)) }
-}
-
-export function updateFrameSettings(project: Project, frameId: number, settings: Frame['settings']): Project {
-  return { ...project, frames: project.frames.map((frame) => frame.id === frameId ? { ...frame, settings, durationSec: settings.drawDurationSec + settings.holdDurationSec, dirty: true } : frame) }
 }

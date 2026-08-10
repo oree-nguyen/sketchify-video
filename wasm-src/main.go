@@ -76,9 +76,9 @@ func settingsFromJS(v js.Value) Settings {
 	if n := v.Get("bgTolerance"); n.Type() == js.TypeNumber {
 		s.BGTolerance = n.Int()
 	}
-	if n := v.Get("mergeRadius"); n.Type() == js.TypeNumber {
-		s.MergeRadius = n.Int()
-	}
+	// Region merging is intentionally locked off. Keeping the field in the data
+	// contract preserves project compatibility, but callers cannot override 0px.
+	s.MergeRadius = 0
 	if n := v.Get("minBlockInk"); n.Type() == js.TypeNumber {
 		s.MinBlockInk = n.Int()
 	}

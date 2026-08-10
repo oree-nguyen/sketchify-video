@@ -157,6 +157,7 @@ export function buildCameraTimeline(
   frameW: number,
   frameH: number,
   pinnedBlockIds: number[] = [],
+  drawDurationSec = 1,
 ): CameraTimeline {
   const aspect = frameW / frameH
   const all = fullFrame(frameW, frameH)
@@ -199,14 +200,14 @@ export function buildCameraTimeline(
     keys = autoFollowKeys(focusSpans, all, settings.camera.zoomOutPortion)
   }
 
-  keys.push(...buildPageZoomKeys(blocks, units, settings, frameW, frameH))
+  keys.push(...buildPageZoomKeys(blocks, units, settings, frameW, frameH, drawDurationSec))
   for (const blockId of pinnedBlockIds) {
     const span = spanById.get(blockId)
     if (span) keys.push({ t: span.t0, crop: span.crop, easing: 'easeInOutCubic', role: 'pin', blockId })
   }
 
   keys = mergeRedundantAndBridge(keys, aspect, frameW, frameH, settings.camera.zoomLevel)
-  keys = limitCameraSpeed(keys, settings.drawDurationSec, frameW)
+  keys = limitCameraSpeed(keys, drawDurationSec, frameW)
   return { keys, focusSpans, fellBack, reason }
 }
 

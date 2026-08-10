@@ -90,8 +90,8 @@ func TestAnalyzeFourObjectsDoesNotMergeLightShadowBridge(t *testing.T) {
 	s := DefaultSettings()
 	s.MinBlockInk = 100
 	result := Analyze(img, w, h, s)
-	if result.EffectiveMergeRadius != 7 {
-		t.Fatalf("effective merge radius = %d, want 7", result.EffectiveMergeRadius)
+	if result.EffectiveMergeRadius != 0 {
+		t.Fatalf("effective merge radius = %d, want locked 0", result.EffectiveMergeRadius)
 	}
 	if !result.OpeningApplied {
 		t.Fatal("opening must run before merge dilation")

@@ -1,5 +1,5 @@
 import { HAND_ASSETS } from '../assets/hands/registry'
-import type { Frame, Project } from '../state/projectStore'
+import { frameDrawDurationSec, retimeAnalysisForFrame, type Frame, type Project } from '../state/projectStore'
 import { buildProjectTimeline } from '../timeline/projectTimeline'
 import type { Analysis } from '../wasm/wasmClient'
 import { Player } from './Player'
@@ -46,7 +46,8 @@ export class ProjectPlayer {
       const previousHalf = previousTransitionHalf(this.project.frames, segment.frameIndex)
       const nextHalf = nextTransitionHalf(this.project.frames, segment.frameIndex)
       const playableDuration = Math.max(0.001, segment.durationSec - previousHalf - nextHalf)
-      const drawDuration = Math.min(frame.settings.drawDurationSec, playableDuration)
+      const naturalDrawDuration = frameDrawDurationSec(frame)
+      const drawDuration = Math.min(naturalDrawDuration, playableDuration)
       const holdDuration = Math.max(0, playableDuration - drawDuration)
       const globalStart = segment.startSec + previousHalf
 
@@ -55,10 +56,11 @@ export class ProjectPlayer {
         drawDurationSec: drawDuration,
         holdDurationSec: holdDuration,
         fps: frame.settings.fps,
-        analysis: this.analyses[frame.id],
+        analysis: retimeAnalysisForFrame(this.analyses[frame.id], frame),
         hand: HAND_ASSETS[this.project.handStyle],
-        settings: { ...frame.settings, drawDurationSec: drawDuration, holdDurationSec: holdDuration },
-        pinnedBlockIds: frame.pinnedBlockIds,
+        settings: { ...frame.settings, holdDurationSec: holdDuration },
+        pinnedBlockIds: frame.objects.filter((object) => object.settings.pinCamera).map((object) => object.blockId),
+        objectSettingsByBlockId: Object.fromEntries(frame.objects.map((object) => [object.blockId, object.settings])),
         onCanvasReady: this.onCanvasReady,
       })
       this.currentPlayer = player
