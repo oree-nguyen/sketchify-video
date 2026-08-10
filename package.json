@@ -13,6 +13,7 @@
     "test:project-browser": "node scripts/cdp-project-playback-e2e.mjs",
     "test:project-transition-browser": "node scripts/cdp-project-transition-e2e.mjs",
     "test:ui-redesign": "node scripts/cdp-ui-redesign.mjs",
+    "test:four-bug-rubric": "node scripts/cdp-four-bug-rubric.mjs",
     "test:go": "go test ./wasm-src"
   },
   "dependencies": {

@@ -4,6 +4,7 @@ import { EditPanel, HandPanel } from './components/EditorControls'
 import { FramePanel, HorizontalTimeline } from './components/FrameTimeline'
 import { fitRect } from './camera/cameraTimeline'
 import { ProjectPlayer } from './render/ProjectPlayer'
+import { Player } from './render/Player'
 import { createFrame, type Frame, type Project } from './state/projectStore'
 import { buildProjectTimeline } from './timeline/projectTimeline'
 import { analyzeImage, type Analysis } from './wasm/wasmClient'
@@ -17,8 +18,10 @@ export default function App() {
   const [panel, setPanel] = useState<'hand' | 'edit'>('hand')
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [showRender, setShowRender] = useState(false)
+  const [showInkMask, setShowInkMask] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const playerRef = useRef<{ stop(): void } | null>(null)
 
   const active = project.frames.find((frame) => frame.id === project.activeFrameId) ?? null
   const analysis = active ? analyses[active.id] ?? null : null
@@ -54,6 +57,7 @@ export default function App() {
   const inspect = async (frameId: number, url: string, settings: Record<string, unknown>): Promise<Analysis | null> => {
     setAnalysisStatus('working')
     try {
+      console.log('[Sketchify] analyzeFrame start', { frameId })
       const image = new Image()
       image.src = url
       await image.decode()
@@ -87,6 +91,7 @@ export default function App() {
 
   const selectFrame = (id: number) => {
     setShowRender(false)
+    setShowInkMask(false)
     setProject((current) => ({ ...current, activeFrameId: id }))
     setPanel('edit')
   }
@@ -116,13 +121,16 @@ export default function App() {
     return () => window.clearTimeout(timeout)
   }, [active?.id, active?.dirty, active?.sourceUrl, active?.settings])
 
+  const stopPlayback = () => playerRef.current?.stop()
+
   const play = async (record: boolean) => {
+    if (isPlaying) { stopPlayback(); return }
     if (!active || !canvasRef.current || (record && !supported)) return
-    setShowRender(true)
+    const activeAtStart = active
     setIsPlaying(true)
-    setProgress(0)
     const readyAnalyses = { ...analyses }
-    for (const frame of project.frames) {
+    const framesToPrepare = record ? project.frames : [activeAtStart]
+    for (const frame of framesToPrepare) {
       if (!readyAnalyses[frame.id] || frame.dirty) {
         const result = await inspect(frame.id, frame.sourceUrl, frame.settings as unknown as Record<string, unknown>)
         if (!result) { setIsPlaying(false); return }
@@ -130,12 +138,38 @@ export default function App() {
       }
     }
     try {
-      const result = await new ProjectPlayer(canvasRef.current, project, readyAnalyses).play(record, setProgress)
+      const canvasReady = () => setShowRender(true)
+      let result: { elapsedMs: number; blob?: Blob }
+      if (record) {
+        setProgress(0)
+        const player = new ProjectPlayer(canvasRef.current, project, readyAnalyses, canvasReady)
+        playerRef.current = player
+        result = await player.play(true, setProgress)
+      } else {
+        const segment = buildProjectTimeline(project).segments.find((item) => item.frameId === activeAtStart.id)
+        const globalStart = segment?.startSec ?? 0
+        console.log('[Sketchify] preview start', { frameId: activeAtStart.id, frameName: activeAtStart.name, blockCount: readyAnalyses[activeAtStart.id].blocks.length })
+        setProgress(globalStart)
+        const player = new Player(canvasRef.current, {
+          sourceUrl: activeAtStart.sourceUrl,
+          drawDurationSec: activeAtStart.settings.drawDurationSec,
+          holdDurationSec: activeAtStart.settings.holdDurationSec,
+          fps: activeAtStart.settings.fps,
+          analysis: readyAnalyses[activeAtStart.id],
+          hand: HAND_ASSETS[project.handStyle],
+          settings: activeAtStart.settings,
+          pinnedBlockIds: activeAtStart.pinnedBlockIds,
+          onCanvasReady: canvasReady,
+        })
+        playerRef.current = player
+        result = await player.play(false, (localTimeSec) => setProgress(globalStart + localTimeSec))
+      }
       if (result.blob) {
         if (videoUrl) URL.revokeObjectURL(videoUrl)
         setVideoUrl(URL.createObjectURL(result.blob))
       }
     } finally {
+      playerRef.current = null
       setIsPlaying(false)
     }
   }
@@ -153,7 +187,7 @@ export default function App() {
     <header className="topbar">
       <div className="brand"><span className="brand-mark">S</span><span>Sketchify <b>Video</b></span><small>LOCAL EDITOR</small></div>
       <div className="top-actions">
-        <button className="quiet" disabled={!active || isPlaying} onClick={() => void play(false)}>Xem thử</button>
+        <button className="quiet" disabled={!active} onClick={() => void play(false)}>{isPlaying ? 'Dừng' : 'Xem thử'}</button>
         <button className="export" disabled={!active || !supported || isPlaying} onClick={() => void play(true)}>Tạo .webm</button>
         {videoUrl && <a className="quiet" href={videoUrl} download="sketchify-video.webm">Tải video</a>}
         {!supported && <small>Trình duyệt không hỗ trợ MediaRecorder. Dùng Chrome hoặc Edge.</small>}
@@ -164,11 +198,12 @@ export default function App() {
       {!horizontal && <FramePanel frames={project.frames} activeId={active?.id} select={selectFrame} upload={() => fileRef.current?.click()} drop={handleDrop} horizontal={() => setHorizontal(true)} onPointerMove={handleSpotlight} />}
 
       <section className="stage spotlight-surface" onPointerMove={handleSpotlight}>
-        <div className="stage-topline"><span>{active ? `KHUNG ${project.frames.findIndex((frame) => frame.id === active.id) + 1}` : 'SẴN SÀNG'}</span><span>{analysisStatus === 'working' ? 'Đang phân tích bằng WASM…' : analysis ? `${analysis.blocks.length} khối đã tách` : analysisStatus === 'error' ? 'Không thể phân tích ảnh' : 'Thêm ảnh để bắt đầu'}</span></div>
+        <div className="stage-topline"><span>{active ? `KHUNG ${project.frames.findIndex((frame) => frame.id === active.id) + 1}` : 'SẴN SÀNG'}</span><span className="stage-diagnostics">{analysis && !showRender && <button className={`mask-toggle ${showInkMask ? 'active' : ''}`} type="button" aria-pressed={showInkMask} onClick={() => setShowInkMask((value) => !value)}>Ink mask</button>}<span>{analysisStatus === 'working' ? 'Đang phân tích bằng WASM…' : analysis ? `${analysis.blocks.length} khối đã tách · r=${analysis.stats.mergeRadiusApplied}px` : analysisStatus === 'error' ? 'Không thể phân tích ảnh' : 'Thêm ảnh để bắt đầu'}</span></span></div>
         <div className={`preview ${showRender ? 'has-render' : ''}`}>
           <canvas ref={canvasRef} className="render-canvas" aria-label="Canvas xem thử" />
           {active && !showRender && <div className="analyzed-image">
             <img className="source-image" src={active.sourceUrl} alt="Khung hiện tại" />
+            {analysis && showInkMask && <InkMaskOverlay analysis={analysis} />}
             {analysis && <div className="block-overlay">{analysis.blocks.map((block) => <span
               className={`block ${block.kind}`}
               key={block.id}
@@ -190,7 +225,7 @@ export default function App() {
         </div>
         <div className="transport">
           <button disabled={isPlaying} onClick={() => setProgress(Math.max(0, progress - 10))}>−10</button>
-          <button className="play" disabled={isPlaying || !active} onClick={() => void play(false)}>{isPlaying ? 'Ⅱ' : '▶'}</button>
+          <button className="play" disabled={!active} onClick={() => void play(false)}>{isPlaying ? 'Ⅱ' : '▶'}</button>
           <button disabled={isPlaying} onClick={() => setProgress(Math.min(total, progress + 10))}>+10</button>
           <span className="duration">{formatTime(progress)} / {formatTime(total)}</span>
         </div>
@@ -215,4 +250,27 @@ export default function App() {
 
 function formatTime(seconds: number) {
   return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`
+}
+
+function InkMaskOverlay({ analysis }: { analysis: Analysis }) {
+  const ref = useRef<HTMLCanvasElement>(null)
+  useEffect(() => {
+    const canvas = ref.current
+    if (!canvas) return
+    canvas.width = analysis.img.w
+    canvas.height = analysis.img.h
+    const context = canvas.getContext('2d', { willReadFrequently: true })
+    if (!context) return
+    const pixels = context.createImageData(analysis.img.w, analysis.img.h)
+    for (let index = 0; index < analysis.img.ink.length; index++) {
+      if (!analysis.img.ink[index]) continue
+      const offset = index * 4
+      pixels.data[offset] = 255
+      pixels.data[offset + 1] = 35
+      pixels.data[offset + 2] = 35
+      pixels.data[offset + 3] = 102
+    }
+    context.putImageData(pixels, 0, 0)
+  }, [analysis])
+  return <canvas ref={ref} className="ink-mask-overlay" aria-label="Ink mask trước dilation" />
 }

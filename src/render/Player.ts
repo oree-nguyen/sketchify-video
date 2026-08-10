@@ -1,10 +1,10 @@
 import type { AnalysisResult, DrawUnit } from '../wasm/wasmClient'
 import type { FrameSettings } from '../state/settingsDefaults'
-import { buildCameraTimeline, cameraAt } from '../camera/cameraTimeline'
+import { buildCameraTimeline, cameraAt, cameraFocusBlockAt } from '../camera/cameraTimeline'
 
 export interface PlayerOptions {
   sourceUrl: string; drawDurationSec: number; holdDurationSec: number; fps: number
-  analysis: AnalysisResult; hand: { src: string; anchorPct: { x: number; y: number } };settings?:FrameSettings;pinnedBlockIds?:number[]
+  analysis: AnalysisResult; hand: { src: string; anchorPct: { x: number; y: number } };settings?:FrameSettings;pinnedBlockIds?:number[];onCanvasReady?:()=>void
 }
 export interface PlayResult { elapsedMs: number; blob?: Blob }
 
@@ -14,13 +14,17 @@ export class Player {
   stop() { this.stopped = true }
 
   async play(record: boolean, onProgress?: (elapsedSec:number)=>void): Promise<PlayResult> {
-    const handImage=await loadImage(this.options.hand.src)
+    const [handImage,sourceImage]=await Promise.all([loadImage(this.options.hand.src),loadImage(this.options.sourceUrl)])
     const {img,units}=this.options.analysis,w=img.w,h=img.h
     const camera=this.options.settings?buildCameraTimeline(this.options.settings,this.options.analysis.blocks,units,w,h,this.options.pinnedBlockIds):null
     const blockTiles=new Map<number,HTMLCanvasElement>()
     this.displayCanvas.width=w;this.displayCanvas.height=h
     const display=this.displayCanvas.getContext('2d',{willReadFrequently:true})!;const content=document.createElement('canvas');content.width=w;content.height=h;const ctx=content.getContext('2d',{willReadFrequently:true})!
     ctx.fillStyle=`rgb(${img.bg.join(',')})`;ctx.fillRect(0,0,w,h)
+    // Resize canvas xoá buffer. Vẽ lại source trong cùng task trước khi cho React
+    // hiện canvas để không có frame đen/trong suốt lúc chuyển sang chế độ Play.
+    display.drawImage(sourceImage,0,0,w,h)
+    this.options.onCanvasReady?.()
     // Tile được tạo lazy đúng một lần rồi cache trực tiếp trên DrawUnit.
     // Dùng WorkImage.rgba từ WASM nên không cần getImageData toàn ảnh lặp lại cho từng unit.
     const unitAlpha=new Float32Array(units.length)
@@ -28,7 +32,7 @@ export class Player {
     const recorder=record?makeRecorder(this.displayCanvas,this.options.fps):undefined,chunks:BlobPart[]=[]
     if(recorder){recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};recorder.start(100)}
     const started=performance.now(),drawMs=this.options.drawDurationSec*1000,totalMs=(this.options.drawDurationSec+this.options.holdDurationSec)*1000
-    let previousProgress=0,unitCursor=0,lastHand:{x:number;y:number}|null=null,angle=0,debugBeforeLogged=false,debugPartialLogs=0,debugPixelLogged=false,finalVerificationLogged=false
+    let previousProgress=0,unitCursor=0,lastHand:{x:number;y:number}|null=null,angle=0,debugBeforeLogged=false,debugPartialLogs=0,debugPixelLogged=false,finalVerificationLogged=false,cameraSampleBucket=-1
     return await new Promise<PlayResult>((resolve)=>{
       const frame=(now:number)=>{
         const elapsed=now-started
@@ -47,7 +51,13 @@ export class Player {
           if(current>prior){if(u.type==='path')drawPathDelta(ctx,u,prior,current,getUnitTile(u,img.rgba,img.bg,w));else{const old=unitAlpha[i];const alpha=old<1?(current-old)/(1-old):0;if(alpha>0){ctx.save();ctx.globalAlpha=alpha;ctx.filter='none';if(i===debugUnitIndex&&debugPartialLogs<4){console.log('[Sketchify] tile alpha trace',{phase:'partial-before-drawImage',unitIndex:i,progress,t0:u.t0,t1:u.t1,accumulatedBefore:old,requestedAlpha:alpha,ctxGlobalAlpha:ctx.globalAlpha});debugPartialLogs++}ctx.drawImage(getUnitTile(u,img.rgba,img.bg,w),u.bbox.x,u.bbox.y);ctx.restore();unitAlpha[i]=current}}}
           break
         }
+        const active=elapsed<drawMs?units.find(u=>progress>=u.t0&&progress<u.t1):undefined
         const crop=cameraAt(camera?.keys??[{t:0,crop:{x:0,y:0,w,h},easing:'linear'}],progress)
+        const sampleBucket=Math.min(9,Math.floor(progress*10))
+        if(active&&sampleBucket!==cameraSampleBucket){
+          cameraSampleBucket=sampleBucket
+          console.log('[Sketchify] camera alignment',{progress,drawBlockId:active.blockId,cameraBlockId:camera?cameraFocusBlockAt(camera.keys,progress):undefined,inTransition:false})
+        }
         display.clearRect(0,0,w,h);display.drawImage(content,crop.x,crop.y,crop.w,crop.h,0,0,w,h)
         drawPushEntry(display,this.options.analysis,units,img.rgba,img.bg,w,h,progress,crop,this.options.settings?.objectPushEntry,blockTiles)
         if(!finalVerificationLogged&&progress>=1&&unitCursor===units.length){
@@ -55,7 +65,6 @@ export class Player {
           finalVerificationLogged=true
         }
         if(debugUnit&&!debugPixelLogged&&unitCursor>debugUnitIndex&&progress>=Math.min(1,debugUnit.t1+.02)&&debugUnit.pixels.length){const pixelIndex=debugUnit.pixels[Math.floor(debugUnit.pixels.length/2)],x=pixelIndex%w,y=Math.floor(pixelIndex/w),sourceOffset=pixelIndex*4;const contentRGBA=Array.from(ctx.getImageData(x,y,1,1).data),displayRGBA=Array.from(display.getImageData(x,y,1,1).data),sourceRGBA=Array.from(img.rgba.slice(sourceOffset,sourceOffset+4));console.log('[Sketchify] completed unit pixel persistence',{unitIndex:debugUnitIndex,progress,point:{x,y},sourceRGBA,contentRGBA,displayRGBA,contentAlpha:contentRGBA[3],displayAlpha:displayRGBA[3]});debugPixelLogged=true}
-        const active=elapsed<drawMs?units.find(u=>progress>=u.t0&&progress<u.t1):undefined
         if(active){const raw=unitPosition(active,progress),pos={x:(raw.x-crop.x)*w/crop.w,y:(raw.y-crop.y)*h/crop.h};if(lastHand){const target=Math.atan2(pos.y-lastHand.y,pos.x-lastHand.x);angle+=(target-angle)*.25}drawHand(display,handImage,this.options.hand.anchorPct,pos.x,pos.y,angle,w);lastHand=pos}
         else if(this.options.settings?.handPushEnding.enabled&&lastHand&&this.options.holdDurationSec>=1.2&&elapsed>=drawMs&&elapsed<drawMs+Math.min(.8,this.options.holdDurationSec)){drawHand(display,handImage,this.options.hand.anchorPct,lastHand.x,lastHand.y,angle,w)}
         previousProgress=progress

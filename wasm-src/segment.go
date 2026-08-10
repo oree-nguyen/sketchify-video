@@ -12,8 +12,10 @@ type Block struct {
 	Kind                 string
 }
 type AnalysisResult struct {
-	Background Color
-	Blocks     []Block
+	Background           Color
+	Blocks               []Block
+	EffectiveMergeRadius int
+	OpeningApplied       bool
 }
 
 // Components dùng flood-fill stack 4-láng giềng, không đệ quy để tránh tràn stack.
@@ -64,7 +66,10 @@ func Analyze(rgba []byte, w, h int, s Settings) AnalysisResult {
 	bg := EstimateBackground(rgba, w, h)
 	fine := InkMask(rgba, w, h, s, bg)
 	fine = DilateSquare(ErodeSquare(fine, w, h, 1), w, h, 1)
-	r := s.MergeRadius * s.WorkingWidth / 960
+	// rgba đã được resize về ảnh làm việc trước khi vào WASM. Scale bán kính theo
+	// chiều rộng THỰC của ảnh này; dùng s.WorkingWidth ở đây sẽ áp 14px cả cho
+	// ảnh 480px và vô tình nối các vật thể cách nhau chỉ vài pixel.
+	r := effectiveMergeRadius(s.MergeRadius, w)
 	dilated := DilateSquare(fine, w, h, r)
 	labels, _ := Components(dilated, w, h)
 	blocks := map[int]*Block{}
@@ -112,7 +117,18 @@ func Analyze(rgba []byte, w, h int, s Settings) AnalysisResult {
 	for i := range out {
 		out[i].ID = i
 	}
-	return AnalysisResult{Background: bg, Blocks: out}
+	return AnalysisResult{Background: bg, Blocks: out, EffectiveMergeRadius: r, OpeningApplied: true}
+}
+
+func effectiveMergeRadius(configured, actualWidth int) int {
+	if configured <= 0 || actualWidth <= 0 {
+		return 0
+	}
+	r := (configured*actualWidth + 480) / 960
+	if r < 1 {
+		return 1
+	}
+	return r
 }
 
 func OrderBlocks(b []Block, mode string, factor float64) {

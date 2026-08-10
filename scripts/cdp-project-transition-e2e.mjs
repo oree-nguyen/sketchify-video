@@ -28,7 +28,7 @@ const expression = String.raw`(async () => {
   if (transitions.length !== 4) throw new Error('Không tìm thấy đủ bốn transition')
   transitions[1].click()
   await wait(100)
-  const previewButton = document.querySelector('.top-actions button.quiet')
+  const previewButton = document.querySelector('.top-actions button.export')
   const initialDisabled = previewButton?.disabled
   previewButton?.click()
   await wait(250)
@@ -47,7 +47,7 @@ const expression = String.raw`(async () => {
       if (previousPixel && previousPixel !== pixel) transitionCanvasChanged = true
       previousPixel = pixel
     }
-    const preview = document.querySelector('.top-actions .quiet')
+    const preview = document.querySelector('.top-actions button.export')
     if (text.startsWith('00:20') && preview && !preview.disabled) break
     await wait(50)
   }

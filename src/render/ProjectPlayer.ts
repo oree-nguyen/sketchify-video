@@ -11,15 +11,18 @@ export interface ProjectPlayResult {
 
 export class ProjectPlayer {
   private stopped = false
+  private currentPlayer: Player | null = null
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
     private readonly project: Project,
     private readonly analyses: Readonly<Record<number, Analysis>>,
+    private readonly onCanvasReady?: () => void,
   ) {}
 
   stop(): void {
     this.stopped = true
+    this.currentPlayer?.stop()
   }
 
   async play(record: boolean, onProgress?: (globalTimeSec: number) => void): Promise<ProjectPlayResult> {
@@ -56,8 +59,11 @@ export class ProjectPlayer {
         hand: HAND_ASSETS[this.project.handStyle],
         settings: { ...frame.settings, drawDurationSec: drawDuration, holdDurationSec: holdDuration },
         pinnedBlockIds: frame.pinnedBlockIds,
+        onCanvasReady: this.onCanvasReady,
       })
+      this.currentPlayer = player
       await player.play(false, (localTimeSec) => onProgress?.(Math.min(timeline.totalDurationSec, globalStart + localTimeSec)))
+      this.currentPlayer = null
 
       const nextFrame = this.project.frames[segment.frameIndex + 1]
       if (nextFrame && segment.transition !== 'none' && segment.transitionStartSec !== undefined && segment.transitionEndSec !== undefined) {

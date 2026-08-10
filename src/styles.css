@@ -24,7 +24,7 @@ html, body, #root { min-width: 320px; min-height: 100%; }
 body { margin: 0; overflow: hidden; background: var(--bg); }
 button, input { font: inherit; }
 button { cursor: pointer; color: inherit; }
-button:disabled { cursor: not-allowed; }
+button:disabled { opacity: .45; }
 
 .app-shell { min-height: 100dvh; background: radial-gradient(circle at 62% 16%, #142436 0, #0d1117 32%, var(--bg) 76%); }
 .topbar { height: 64px; padding: 0 22px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); background: #0d1117; }
@@ -65,6 +65,9 @@ button:disabled { cursor: not-allowed; }
 .stage { height: 100%; min-width: 0; padding: 24px clamp(18px, 4vw, 52px); display: flex; flex-direction: column; justify-content: center; overflow-y: auto; overscroll-behavior: contain; }
 .stage-topline { display: flex; justify-content: space-between; font: 11px ui-monospace, monospace; letter-spacing: 1px; color: #8c9aa9; margin-bottom: 10px; }
 .stage-topline span:last-child { color: var(--accent-strong); }
+.stage-diagnostics { display: flex; align-items: center; gap: 10px; }
+.mask-toggle { min-height: 28px; padding: 4px 9px; border-color: #3a4957; border-radius: 7px; background: #111922; color: #b7c2cd; font: 10px ui-monospace, monospace; letter-spacing: .6px; }
+.mask-toggle:hover, .mask-toggle.active { border-color: var(--accent); color: var(--accent); background: #84cc1612; box-shadow: 0 0 0 1px #84cc1638, 0 0 14px #84cc1638; }
 .preview { flex: 0 1 min(59vh, 620px); min-height: 280px; height: min(59vh, 620px); position: relative; background: repeating-linear-gradient(45deg, #111923 0 12px, #101720 12px 24px); border: 1px solid #304050; border-radius: 14px; display: grid; place-items: center; overflow: hidden; }
 .source-image { max-height: 100%; max-width: 100%; object-fit: contain; background: #fff; }
 .empty-preview { text-align: center; max-width: 350px; }

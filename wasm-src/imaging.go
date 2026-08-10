@@ -88,7 +88,9 @@ func EstimateBackground(rgba []byte, w, h int) Color {
 }
 func colorDistance(r, g, b int, c Color) int {
 	dr, dg, db := r-c.R, g-c.G, b-c.B
-	return int(math.Sqrt(float64(dr*dr + dg*dg + db*db)))
+	// BGTolerance biểu diễn mức lệch trung bình trên một kênh. Chuẩn hoá theo
+	// sqrt(3) để bóng xám nhẹ không bị phóng đại và biến thành cầu nối ink.
+	return int(math.Sqrt(float64(dr*dr+dg*dg+db*db) / 3))
 }
 
 // InkMask kết hợp Sobel và chênh lệch nền để vùng màu phẳng không bị rỗng.

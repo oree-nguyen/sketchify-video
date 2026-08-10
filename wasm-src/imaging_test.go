@@ -61,6 +61,45 @@ func TestAnalyzeSixBlocks(t *testing.T) {
 		t.Fatalf("got %d blocks", len(r.Blocks))
 	}
 }
+
+func TestAnalyzeFourObjectsDoesNotMergeLightShadowBridge(t *testing.T) {
+	w, h := 480, 180
+	img := make([]byte, w*h*4)
+	for i := 0; i < len(img); i += 4 {
+		img[i], img[i+1], img[i+2], img[i+3] = 255, 255, 255, 255
+	}
+	// Bốn silhouette tối, cách nhau 20px. Dải xám 230 mô phỏng bóng mờ nối
+	// giữa chúng: đây không phải ink và phải bị loại trước opening/dilation.
+	for object := 0; object < 4; object++ {
+		x0 := 45 + object*105
+		for y := 45; y < 125; y++ {
+			for x := x0; x < x0+85; x++ {
+				j := (y*w + x) * 4
+				img[j], img[j+1], img[j+2] = 35, 45, 60
+			}
+		}
+		if object < 3 {
+			for y := 112; y < 118; y++ {
+				for x := x0 + 85; x < x0+105; x++ {
+					j := (y*w + x) * 4
+					img[j], img[j+1], img[j+2] = 230, 230, 230
+				}
+			}
+		}
+	}
+	s := DefaultSettings()
+	s.MinBlockInk = 100
+	result := Analyze(img, w, h, s)
+	if result.EffectiveMergeRadius != 7 {
+		t.Fatalf("effective merge radius = %d, want 7", result.EffectiveMergeRadius)
+	}
+	if !result.OpeningApplied {
+		t.Fatal("opening must run before merge dilation")
+	}
+	if len(result.Blocks) != 4 {
+		t.Fatalf("got %d blocks, want 4", len(result.Blocks))
+	}
+}
 func TestTraceContourSquare10(t *testing.T) {
 	mask := make([]uint8, 100)
 	for i := range mask {

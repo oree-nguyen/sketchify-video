@@ -93,8 +93,12 @@ function mergeRedundantAndBridge(keys: CamKey[], aspect: number, frameW: number,
   const out: CamKey[] = []
   for (const key of sortAndResolveSameTime(keys)) {
     const previous = out.at(-1)
-    if (previous && rectIou(previous.crop, key.crop) > 0.8) continue
-    if (previous && rectIou(previous.crop, key.crop) < 0.25) {
+    const changesDrawFocus = previous?.blockId !== undefined && key.blockId !== undefined && previous.blockId !== key.blockId
+      && (key.role === 'focus' || key.role === 'manual' || key.role === 'pin')
+    if (previous && !changesDrawFocus && rectIou(previous.crop, key.crop) > 0.8) continue
+    // Không chèn bridge giữa hai focus block: bridge ở giữa t0 của chúng làm
+    // camera rời block hiện tại trước khi unit đầu tiên của block sau bắt đầu.
+    if (previous && !changesDrawFocus && rectIou(previous.crop, key.crop) < 0.25) {
       out.push({
         t: (previous.t + key.t) / 2,
         crop: fitRect(unionRect(previous.crop, key.crop), aspect, 0, frameW, frameH, maxZoom),
@@ -114,6 +118,7 @@ function limitCameraSpeed(keys: CamKey[], durationSec: number, frameW: number): 
   for (let index = 1; index < keys.length; index++) {
     const previous = out[index - 1]
     const key = { ...keys[index] }
+    const timingLockedToDrawUnit = key.role === 'focus' || key.role === 'manual' || key.role === 'pin'
     const previousCenterX = previous.crop.x + previous.crop.w / 2
     const previousCenterY = previous.crop.y + previous.crop.h / 2
     const centerX = key.crop.x + key.crop.w / 2
@@ -123,7 +128,7 @@ function limitCameraSpeed(keys: CamKey[], durationSec: number, frameW: number): 
     const zoomRatio = Math.max(previous.crop.w / key.crop.w, key.crop.w / previous.crop.w)
     const zoomSeconds = zoomRatio > 1 ? Math.log(zoomRatio) / Math.log(2.2) : 0
     const minimumDelta = Math.max(panSeconds, zoomSeconds) / Math.max(0.001, durationSec)
-    key.t = clamp01(Math.max(key.t, previous.t + minimumDelta))
+    if (!timingLockedToDrawUnit) key.t = clamp01(Math.max(key.t, previous.t + minimumDelta))
     out.push(key)
   }
   return sortAndResolveSameTime(out)
@@ -220,6 +225,11 @@ export function cameraAt(keys: CamKey[], t: number): Rect {
   }
   const previous = keys[left]
   const next = keys[right]
+  const nextStartsNewBlock = next.blockId !== undefined && next.blockId !== previous.blockId
+    && (next.role === 'focus' || next.role === 'manual' || next.role === 'pin')
+  // Focus block là một cut có chủ đích tại đúng t0. Nội suy đến focus mới từ
+  // trước t0 chính là lỗi camera nhảy sang vật thể chưa được vẽ.
+  if (nextStartsNewBlock) return t < next.t ? { ...previous.crop } : { ...next.crop }
   let progress = clamp01((t - previous.t) / Math.max(0.000001, next.t - previous.t))
   if (next.easing === 'easeInOutCubic') progress = progress < 0.5 ? 4 * progress ** 3 : 1 - ((-2 * progress + 2) ** 3) / 2
   return {
@@ -228,6 +238,16 @@ export function cameraAt(keys: CamKey[], t: number): Rect {
     w: previous.crop.w + (next.crop.w - previous.crop.w) * progress,
     h: previous.crop.h + (next.crop.h - previous.crop.h) * progress,
   }
+}
+
+export function cameraFocusBlockAt(keys: CamKey[], t: number): number | undefined {
+  let focused: number | undefined
+  for (const key of keys) {
+    if (key.t > t) break
+    if ((key.role === 'focus' || key.role === 'manual' || key.role === 'pin') && key.blockId !== undefined) focused = key.blockId
+    if (key.role === 'zoom-out' || (key.role === 'full' && key.t > 0)) focused = undefined
+  }
+  return focused
 }
 
 // Helper kiểm thử hợp đồng keyMid: mỗi ranh giới chỉ union đúng hai trang kề nhau.

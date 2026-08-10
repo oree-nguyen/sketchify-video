@@ -62,7 +62,7 @@ const expression = String.raw`(async () => {
     await wait(100)
   }
   const totalBefore = document.querySelector('.duration')?.textContent ?? ''
-  document.querySelector('.top-actions .quiet')?.click()
+  document.querySelector('.top-actions button.export')?.click()
 
   let crossedBoundary = false
   let boundaryText = ''
@@ -78,7 +78,7 @@ const expression = String.raw`(async () => {
       const canvas = document.querySelector('.render-canvas')
       boundaryPixel = [...canvas.getContext('2d', { willReadFrequently: true }).getImageData(5, 5, 1, 1).data]
     }
-    if (!document.querySelector('.top-actions .quiet')?.disabled && elapsed >= 19) break
+    if (!document.querySelector('.top-actions button.export')?.disabled && elapsed >= 19) break
     await wait(100)
   }
   const finalText = document.querySelector('.duration')?.textContent ?? ''

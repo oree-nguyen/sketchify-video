@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_SETTINGS, type FrameSettings } from '../state/settingsDefaults'
 import type { Block, DrawUnit, Rect } from '../wasm/wasmClient'
-import { buildBlockFocusSpans, buildCameraTimeline, cameraAt, fitRect } from './cameraTimeline'
+import { buildBlockFocusSpans, buildCameraTimeline, cameraAt, cameraFocusBlockAt, fitRect } from './cameraTimeline'
 import { buildPageZoomKeys } from './pageZoom'
 
 const settings = (mode: FrameSettings['camera']['mode'] = 'A-auto-follow'): FrameSettings => {
@@ -56,7 +56,9 @@ describe('camera auto-follow theo DrawUnit thật', () => {
     expect(secondKey?.t).toBe(0.5)
     closeRect(cameraAt(timeline.keys, 0), timeline.focusSpans[0].crop)
     closeRect(cameraAt(timeline.keys, 0.5), timeline.focusSpans[1].crop)
-    expect(timeline.keys.some((key) => key.role === 'bridge')).toBe(true)
+    expect(timeline.keys.some((key) => key.role === 'bridge' && key.t > 0 && key.t < 0.5)).toBe(false)
+    expect(cameraFocusBlockAt(timeline.keys, 0.49)).toBe(10)
+    expect(cameraFocusBlockAt(timeline.keys, 0.5)).toBe(20)
     expect(timeline.keys.every((key, index) => key.t >= 0 && key.t <= 1 && (index === 0 || key.t >= timeline.keys[index - 1].t))).toBe(true)
     for (const key of timeline.keys) expect(key.crop.w / key.crop.h).toBeCloseTo(2, 8)
   })

@@ -42,7 +42,7 @@ func analyzeJS(_ js.Value, args []js.Value) interface{} {
 		}
 		jsUnits[i] = map[string]interface{}{"type": u.Type, "blockId": u.BlockID, "bbox": rectJS(u.BBox), "pixels": intsJS(u.Pixels), "path": floatsJS(path), "color": intsJS([]int{u.Color.R, u.Color.G, u.Color.B}), "cost": u.Cost, "t0": u.T0, "t1": u.T1}
 	}
-	return map[string]interface{}{"img": map[string]interface{}{"rgba": bytesJS(rgba), "gray": bytesJS(Gray(rgba)), "ink": bytesJS(InkMask(rgba, width, height, settings, result.Background)), "w": width, "h": height, "bg": intsJS([]int{result.Background.R, result.Background.G, result.Background.B})}, "blocks": blocks, "units": jsUnits, "stats": map[string]interface{}{"blocks": len(blocks), "units": len(units)}}
+	return map[string]interface{}{"img": map[string]interface{}{"rgba": bytesJS(rgba), "gray": bytesJS(Gray(rgba)), "ink": bytesJS(InkMask(rgba, width, height, settings, result.Background)), "w": width, "h": height, "bg": intsJS([]int{result.Background.R, result.Background.G, result.Background.B})}, "blocks": blocks, "units": jsUnits, "stats": map[string]interface{}{"blocks": len(blocks), "units": len(units), "mergeRadiusConfigured": settings.MergeRadius, "mergeRadiusApplied": result.EffectiveMergeRadius, "workingWidthActual": width, "openingApplied": result.OpeningApplied}}
 }
 
 func rectJS(r Rect) map[string]interface{} {
