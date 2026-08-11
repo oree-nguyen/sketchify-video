@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_SETTINGS } from './settingsDefaults'
-import { frameDrawDurationSec, frameDurationSec, reconcileFrameObjects, reorderFrameObjects, retimeAnalysisForFrame, updateObjectSettings, type Frame } from './projectStore'
+import { frameDrawDurationSec, frameDurationSec, objectDropInsertionIndex, reconcileFrameObjects, reorderFrameObjects, retimeAnalysisForFrame, setObjectOrder, updateObjectSettings, type Frame, type Project } from './projectStore'
 import type { Analysis, Block } from '../wasm/wasmClient'
 
 const block = (id: number, x: number): Block => ({
@@ -50,6 +50,21 @@ describe('FrameObject contract', () => {
     const changed = reorderFrameObjects(before, before.objects[2].objectId, before.objects[0].objectId)
     expect(changed.objects.map((object) => object.blockId)).toEqual([30, 10, 20])
     expect(changed.objects.map(({ objectId, blockId }) => ({ objectId, blockId })).sort((a, b) => a.blockId - b.blockId)).toEqual(ids.sort((a, b) => a.blockId - b.blockId))
+  })
+
+  it('tính đúng vị trí thả trước/sau khi kéo lên và kéo xuống', () => {
+    const frame = makeFrame(31, [block(10, 0), block(20, 20), block(30, 40), block(40, 60)])
+    const [first, second, third, fourth] = frame.objects
+    expect(objectDropInsertionIndex(frame.objects, first.objectId, third.objectId, 'before')).toBe(1)
+    expect(objectDropInsertionIndex(frame.objects, first.objectId, third.objectId, 'after')).toBe(2)
+    expect(objectDropInsertionIndex(frame.objects, fourth.objectId, second.objectId, 'before')).toBe(1)
+    expect(objectDropInsertionIndex(frame.objects, fourth.objectId, second.objectId, 'after')).toBe(2)
+    const project: Project = { frames: [frame], activeFrameId: frame.id, handStyle: 'pencil', playhead: { globalTimeSec: 0 } }
+    const insertion = objectDropInsertionIndex(frame.objects, first.objectId, third.objectId, 'after')!
+    const moved = setObjectOrder(project, frame.id, first.objectId, insertion).frames[0]
+    expect(moved.objects.map((object) => object.blockId)).toEqual([20, 30, 10, 40])
+    const timed = retimeAnalysisForFrame(analysis([block(10, 0), block(20, 20), block(30, 40), block(40, 60)]), moved)
+    expect([...new Set(timed.units.map((unit) => unit.blockId))]).toEqual([20, 30, 10, 40])
   })
 
   it('reconcile giữ settings theo hình học dù blockId đổi', () => {

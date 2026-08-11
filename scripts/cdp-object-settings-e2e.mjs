@@ -73,6 +73,17 @@ const result = await evaluate(String.raw`(async () => {
   })
   await wait(150)
   const durations = [...document.querySelectorAll('.object-duration input')].map((input) => Number(input.value))
+  const reorderBefore = [...document.querySelectorAll('.object-row')].map((row) => row.dataset.objectId)
+  const sourceRow = document.querySelectorAll('.object-row')[0]
+  const targetRow = document.querySelectorAll('.object-row')[2]
+  const targetBounds = targetRow.getBoundingClientRect()
+  const dragData = new DataTransfer()
+  sourceRow.dispatchEvent(new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: dragData }))
+  targetRow.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dragData, clientY: targetBounds.bottom - 2 }))
+  targetRow.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dragData, clientY: targetBounds.bottom - 2 }))
+  sourceRow.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dragData }))
+  await wait(150)
+  const reorderAfter = [...document.querySelectorAll('.object-row')].map((row) => row.dataset.objectId)
   const pushButtons = [...document.querySelectorAll('.object-row')].map((row) => row.querySelector('.object-flags button:first-child'))
   pushButtons[1]?.click(); pushButtons[3]?.click()
   const pinButton = document.querySelectorAll('.object-row')[2]?.querySelector('.object-flags button:last-child')
@@ -87,6 +98,9 @@ const result = await evaluate(String.raw`(async () => {
   return {
     objectRows: rows.length,
     durations,
+    reorderBefore,
+    reorderAfter,
+    dragReordered: reorderAfter.join('|') === [reorderBefore[1], reorderBefore[2], reorderBefore[0], ...reorderBefore.slice(3)].join('|'),
     drawAndTotalVisible: frameText.includes('15s') && frameText.includes('17s'),
     analysisCallsBefore,
     analysisCallsAfter,
@@ -108,6 +122,7 @@ const objectScreenshot = await send('Page.captureScreenshot', { format: 'png', c
 await writeFile('.tmp-object-settings-e2e.png', Buffer.from(objectScreenshot.data, 'base64'))
 result.passed = result.objectRows === 5
   && JSON.stringify(result.durations) === JSON.stringify([1, 2, 3, 4, 5])
+  && result.dragReordered
   && result.drawAndTotalVisible
   && result.noReanalysis
   && result.mergeRadiusConfigured === 0 && result.mergeRadiusApplied === 0

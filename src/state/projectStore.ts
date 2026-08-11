@@ -162,6 +162,16 @@ export function setObjectOrder(project: Project, frameId: number, objectId: stri
   })
 }
 
+export function objectDropInsertionIndex(objects: FrameObject[], fromObjectId: string, toObjectId: string, position: 'before' | 'after'): number | null {
+  const ordered = [...objects].sort((a, b) => a.settings.order - b.settings.order)
+  const sourceIndex = ordered.findIndex((object) => object.objectId === fromObjectId)
+  const targetIndex = ordered.findIndex((object) => object.objectId === toObjectId)
+  if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return null
+  let insertionIndex = targetIndex + (position === 'after' ? 1 : 0)
+  if (sourceIndex < insertionIndex) insertionIndex--
+  return insertionIndex
+}
+
 export function setObjectEffect(project: Project, frameId: number, objectId: string, effectPatch: Partial<Pick<ObjectSettings, 'kindOverride' | 'strokeColorMode' | 'inkColor' | 'strokeWidth'>>): Project {
   return updateProjectFrame(project, frameId, (frame) => updateObjectSettings(frame, objectId, effectPatch))
 }

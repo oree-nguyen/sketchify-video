@@ -3,7 +3,7 @@ import { fitRect } from './camera/cameraTimeline'
 import { EditPanel, HandPanel } from './components/EditorControls'
 import { FramePanel, HorizontalTimeline } from './components/FrameTimeline'
 import { ProjectPlayer } from './render/ProjectPlayer'
-import { createFrame, reconcileFrameObjects, setFrameCamera, setFrameHold, setFramePageZoom, setFrameTransition, setObjectDuration, setObjectEffect, setObjectOrder, setObjectPinCamera, setObjectPush, syncFrameDuration, type Frame, type ObjectSettings, type Project } from './state/projectStore'
+import { createFrame, objectDropInsertionIndex, reconcileFrameObjects, setFrameCamera, setFrameHold, setFramePageZoom, setFrameTransition, setObjectDuration, setObjectEffect, setObjectOrder, setObjectPinCamera, setObjectPush, syncFrameDuration, type Frame, type ObjectSettings, type Project } from './state/projectStore'
 import type { FrameSettings } from './state/settingsDefaults'
 import { buildProjectTimeline } from './timeline/projectTimeline'
 import { analyzeImage, type Analysis } from './wasm/wasmClient'
@@ -144,10 +144,12 @@ export default function App() {
     return next
   })
 
-  const reorderObject = (fromObjectId: string, toObjectId: string) => setProject((current) => {
+  const reorderObject = (fromObjectId: string, toObjectId: string, position: 'before' | 'after') => setProject((current) => {
     const frame = current.frames.find((candidate) => candidate.id === current.activeFrameId)
-    const target = frame?.objects.find((object) => object.objectId === toObjectId)
-    return frame && target ? setObjectOrder(current, frame.id, fromObjectId, target.settings.order) : current
+    if (!frame) return current
+    const insertionIndex = objectDropInsertionIndex(frame.objects, fromObjectId, toObjectId, position)
+    if (insertionIndex === null) return current
+    return setObjectOrder(current, frame.id, fromObjectId, insertionIndex)
   })
 
   const stopPlayback = () => playerRef.current?.stop()

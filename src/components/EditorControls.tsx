@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useRef, type CSSProperties, type DragEvent, type MutableRefObject, type ReactNode } from 'react'
 import { HAND_ASSETS } from '../assets/hands/registry'
 import { buildCameraTimeline } from '../camera/cameraTimeline'
 import { frameDrawDurationSec, frameDurationSec, type Frame, type FrameObject, type HandStyleId, type ObjectSettings, type TransitionType } from '../state/projectStore'
@@ -47,11 +47,12 @@ interface EditPanelProps {
   updateFrameSettings: (patch: Partial<FrameSettings>) => void
   updateTransition: (patch: Partial<Frame['transitionToNext']>) => void
   updateObject: (objectId: string, patch: Partial<ObjectSettings>) => void
-  reorderObject: (fromObjectId: string, toObjectId: string) => void
+  reorderObject: (fromObjectId: string, toObjectId: string, position: 'before' | 'after') => void
 }
 
 export function EditPanel({ frame, analysis, last, scope, setScope, selectedObjectId, selectObject, updateFrameSettings, updateTransition, updateObject, reorderObject }: EditPanelProps) {
-  const [draggedId, setDraggedId] = useState<string | null>(null)
+  const draggedObjectId = useRef<string | null>(null)
+  const dropElement = useRef<HTMLElement | null>(null)
   const drawDuration = frameDrawDurationSec(frame)
   const pinned = frame.objects.filter((object) => object.settings.pinCamera).map((object) => object.blockId)
   const cameraTimeline = analysis ? buildCameraTimeline(frame.settings, analysis.blocks, analysis.units, analysis.img.w, analysis.img.h, pinned, drawDuration) : null
@@ -70,11 +71,14 @@ export function EditPanel({ frame, analysis, last, scope, setScope, selectedObje
           {[...frame.objects].sort((a, b) => a.settings.order - b.settings.order).map((object) => <article
             className={`object-row ${selected?.objectId === object.objectId ? 'selected' : ''}`}
             key={object.objectId}
+            data-object-id={object.objectId}
+            data-block-id={object.blockId}
             draggable
-            onDragStart={() => setDraggedId(object.objectId)}
-            onDragEnd={() => setDraggedId(null)}
-            onDragOver={(event) => event.preventDefault()}
-            onDrop={() => { if (draggedId) reorderObject(draggedId, object.objectId); setDraggedId(null) }}
+            onDragStart={(event) => beginObjectDrag(event, object.objectId, draggedObjectId)}
+            onDragEnd={(event) => finishObjectDrag(event, draggedObjectId, dropElement)}
+            onDragOver={(event) => markObjectDrop(event, object.objectId, draggedObjectId, dropElement)}
+            onDragLeave={(event) => clearObjectDropOnLeave(event, dropElement)}
+            onDrop={(event) => dropObject(event, object.objectId, draggedObjectId, dropElement, reorderObject)}
             onClick={() => selectObject(object.objectId)}
           >
             <span className="object-grip" aria-hidden="true">⠿</span>
@@ -141,6 +145,50 @@ export function EditPanel({ frame, analysis, last, scope, setScope, selectedObje
       </Accordion>}
     </div>
   </>
+}
+
+function beginObjectDrag(event: DragEvent<HTMLElement>, objectId: string, dragged: MutableRefObject<string | null>) {
+  dragged.current = objectId
+  event.dataTransfer.effectAllowed = 'move'
+  event.dataTransfer.setData('application/x-sketchify-object', objectId)
+  event.dataTransfer.setData('text/plain', objectId)
+  event.currentTarget.classList.add('dragging')
+}
+
+function markObjectDrop(event: DragEvent<HTMLElement>, targetId: string, dragged: MutableRefObject<string | null>, dropElement: MutableRefObject<HTMLElement | null>) {
+  const sourceId = event.dataTransfer.getData('application/x-sketchify-object') || dragged.current
+  if (!sourceId || sourceId === targetId) return
+  event.preventDefault()
+  event.dataTransfer.dropEffect = 'move'
+  const bounds = event.currentTarget.getBoundingClientRect()
+  const position = event.clientY < bounds.top + bounds.height / 2 ? 'before' : 'after'
+  if (dropElement.current && dropElement.current !== event.currentTarget) delete dropElement.current.dataset.dropPosition
+  event.currentTarget.dataset.dropPosition = position
+  dropElement.current = event.currentTarget
+}
+
+function clearObjectDropOnLeave(event: DragEvent<HTMLElement>, dropElement: MutableRefObject<HTMLElement | null>) {
+  if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
+  delete event.currentTarget.dataset.dropPosition
+  if (dropElement.current === event.currentTarget) dropElement.current = null
+}
+
+function dropObject(event: DragEvent<HTMLElement>, targetId: string, dragged: MutableRefObject<string | null>, dropElement: MutableRefObject<HTMLElement | null>, reorder: (from: string, to: string, position: 'before' | 'after') => void) {
+  event.preventDefault()
+  event.stopPropagation()
+  const sourceId = event.dataTransfer.getData('application/x-sketchify-object') || event.dataTransfer.getData('text/plain') || dragged.current
+  const position = event.currentTarget.dataset.dropPosition === 'after' ? 'after' : 'before'
+  delete event.currentTarget.dataset.dropPosition
+  dropElement.current = null
+  dragged.current = null
+  if (sourceId && sourceId !== targetId) reorder(sourceId, targetId, position)
+}
+
+function finishObjectDrag(event: DragEvent<HTMLElement>, dragged: MutableRefObject<string | null>, dropElement: MutableRefObject<HTMLElement | null>) {
+  event.currentTarget.classList.remove('dragging')
+  if (dropElement.current) delete dropElement.current.dataset.dropPosition
+  dropElement.current = null
+  dragged.current = null
 }
 
 function ObjectThumbnail({ analysis, object }: { analysis: Analysis | null; object: FrameObject }) {
