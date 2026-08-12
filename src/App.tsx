@@ -358,7 +358,10 @@ export default function App() {
     }
     try {
       const canvasReady = () => setShowRender(true)
-      setProgress(0)
+      const playbackStartSec = record
+        ? 0
+        : buildProjectTimeline(playbackProject).segments.find((segment) => segment.frameId === playbackProject.activeFrameId)?.startSec ?? 0
+      setProgress(playbackStartSec)
       console.log('[Sketchify] project playback start', { record, frames: playbackProject.frames.length, totalDurationSec: buildProjectTimeline(playbackProject).totalDurationSec })
       const player = new ProjectPlayer(canvasRef.current, playbackProject, readyAnalyses, canvasReady)
       playerRef.current = player

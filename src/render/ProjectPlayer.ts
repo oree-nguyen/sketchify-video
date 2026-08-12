@@ -31,6 +31,9 @@ export class ProjectPlayer {
     if (missing.length) throw new Error(`Chưa phân tích xong Frame: ${missing.map((frame) => frame.name).join(', ')}`)
     if (!timeline.segments.length) return { elapsedMs: 0 }
 
+    const requestedStartId = record ? this.project.frames[0]?.id : this.project.activeFrameId
+    const startFrameIndex = Math.max(0, this.project.frames.findIndex((frame) => frame.id === requestedStartId))
+    const firstSegment = timeline.segments[startFrameIndex] ?? timeline.segments[0]
     const audio = await ProjectAudioSession.create(this.project, record)
     const recorder = record ? makeRecorder(this.canvas, this.project.frames[0].settings.fps, audio?.captureStream) : undefined
     const chunks: BlobPart[] = []
@@ -42,10 +45,13 @@ export class ProjectPlayer {
     audio?.start()
 
     const startedAt = performance.now()
-    for (const segment of timeline.segments) {
+    onProgress?.(firstSegment.startSec)
+    for (const segment of timeline.segments.slice(startFrameIndex)) {
       if (this.stopped) break
       const frame = this.project.frames[segment.frameIndex]
-      const previousHalf = previousTransitionHalf(this.project.frames, segment.frameIndex)
+      // Preview starts cleanly at the selected frame; an incoming transition
+      // belongs to the previous frame and must not pull preview back to it.
+      const previousHalf = segment.frameIndex === startFrameIndex ? 0 : previousTransitionHalf(this.project.frames, segment.frameIndex)
       const nextHalf = nextTransitionHalf(this.project.frames, segment.frameIndex)
       const playableDuration = Math.max(0.001, segment.durationSec - previousHalf - nextHalf)
       const naturalDrawDuration = frameDrawDurationSec(frame)
@@ -84,7 +90,7 @@ export class ProjectPlayer {
     }
 
     const finalTime = this.stopped
-      ? Math.min(timeline.totalDurationSec, (performance.now() - startedAt) / 1000)
+      ? Math.min(timeline.totalDurationSec, firstSegment.startSec + (performance.now() - startedAt) / 1000)
       : timeline.totalDurationSec
     onProgress?.(finalTime)
     if (!recorder) {
