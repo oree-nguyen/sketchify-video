@@ -221,10 +221,20 @@ button:disabled { opacity: .45; }
 
 .ai-dialog { width: min(680px, calc(100vw - 28px)); max-height: min(760px, calc(100dvh - 28px)); padding: 0; border: 1px solid #3a4855; border-radius: 16px; background: #0d131a; color: var(--text); box-shadow: 0 28px 100px #000c, 0 0 38px #84cc1625; overflow: auto; }
 .ai-dialog::backdrop { background: #05070bd6; backdrop-filter: blur(5px); }
+.ai-dialog.is-minimized { position: fixed; right: 18px; bottom: 18px; inset-block-start: auto; inset-inline-start: auto; transform: none; width: min(390px, calc(100vw - 32px)); max-height: none; overflow: hidden; border-radius: 12px; box-shadow: 0 14px 42px #000b, 0 0 22px #84cc1630; }
+.ai-dialog.is-minimized::backdrop { background: transparent; backdrop-filter: none; }
+.ai-dialog.is-minimized .ai-dialog-head { position: static; padding: 11px 13px; align-items: center; border-bottom: 0; }
+.ai-dialog.is-minimized .ai-dialog-head h2 { margin: 2px 0 0; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ai-dialog.is-minimized .ai-dialog-head span { font-size: 8px; }
+.ai-dialog.is-minimized .ai-dialog-actions button { width: 28px; height: 28px; font-size: 16px; }
+.ai-dialog.is-minimized > :not(.ai-dialog-head):not(.ai-progress) { display: none; }
+.ai-dialog.is-minimized .ai-progress { margin: 0 13px 11px; padding: 7px 9px; font-size: 10px; }
 .ai-dialog-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 21px 22px 16px; border-bottom: 1px solid var(--line); background: #0d131af2; backdrop-filter: blur(14px); }
 .ai-dialog-head span { color: var(--accent-strong); font: 9px 'Oswald Sketchify', sans-serif; letter-spacing: 1.2px; }
 .ai-dialog-head h2 { margin: 5px 0 0; font-size: 23px; letter-spacing: -.6px; }
-.ai-dialog-head > button { width: 32px; height: 32px; border: 1px solid var(--line-strong); border-radius: 8px; background: #121920; font-size: 22px; line-height: 1; }
+.ai-dialog-actions { display: flex; gap: 6px; }
+.ai-dialog-actions button { width: 32px; height: 32px; border: 1px solid var(--line-strong); border-radius: 8px; background: #121920; font-size: 18px; line-height: 1; }
+.ai-dialog-actions button:hover { border-color: var(--accent); color: var(--accent-strong); box-shadow: 0 0 12px #84cc1638; }
 .ai-choice-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 22px; }
 .ai-choice-grid button { min-height: 142px; padding: 17px; border: 1px solid #2d3945; border-radius: 12px; background: #111820; text-align: left; transition: .18s ease; }
 .ai-choice-grid button:hover { border-color: var(--accent); background: #15210f; box-shadow: 0 0 22px #84cc163b; transform: translateY(-2px); }

@@ -26,6 +26,7 @@ export function AIGenerationDialog(props: Props) {
   const [prompt, setPrompt] = useState('')
   const [topic, setTopic] = useState('')
   const [sceneCount, setSceneCount] = useState(5)
+  const [minimized, setMinimized] = useState(false)
 
   useEffect(() => {
     const dialog = dialogRef.current
@@ -39,13 +40,20 @@ export function AIGenerationDialog(props: Props) {
   }, [props.open, props.initialMode])
 
   useEffect(() => {
+    if (props.open) setMinimized(false)
+  }, [props.open])
+
+  useEffect(() => {
     if (props.open && props.initialMode === 'connection') setAppKey(props.savedAppKey ?? '')
   }, [props.open, props.initialMode, props.savedAppKey])
 
-  return <dialog ref={dialogRef} className="ai-dialog" onCancel={(event) => { if (props.busy) event.preventDefault(); else props.close() }}>
+  return <dialog ref={dialogRef} className={`ai-dialog ${minimized ? 'is-minimized' : ''}`} onCancel={(event) => { if (props.busy) event.preventDefault(); else props.close() }}>
     <div className="ai-dialog-head">
       <div><span>NGUỒN NỘI DUNG</span><h2>{mode === 'story' ? 'Tạo video từ chủ đề' : mode === 'image' ? 'Tạo ảnh bằng AI' : mode === 'connection' ? 'Kết nối Pollinations' : 'Thêm khung hình'}</h2></div>
-      <button type="button" disabled={props.busy} onClick={props.close} aria-label="Đóng">×</button>
+      <div className="ai-dialog-actions">
+        <button type="button" onClick={() => setMinimized((value) => !value)} aria-label={minimized ? 'Mở rộng cửa sổ' : 'Thu nhỏ cửa sổ'} title={minimized ? 'Mở rộng' : 'Thu nhỏ'}>{minimized ? '↗' : '—'}</button>
+        <button type="button" disabled={props.busy} onClick={props.close} aria-label="Đóng">×</button>
+      </div>
     </div>
 
     {mode === 'choose' && <div className="ai-choice-grid">
