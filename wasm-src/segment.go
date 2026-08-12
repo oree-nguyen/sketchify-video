@@ -107,15 +107,15 @@ func Analyze(rgba []byte, w, h int, s Settings) AnalysisResult {
 		b.BBox.H = b.BBox.H - b.BBox.Y + 1
 		b.CentroidX /= float64(b.InkArea)
 		b.CentroidY /= float64(b.InkArea)
+		b.Kind = ClassifyBlock(rgba, w, *b, s)
 		out = append(out, *b)
 	}
-	out = MergeTextBlocks(out, w, h)
+	out = MergeTextBlocks(out, rgba, w, h)
 	filtered := out[:0]
 	for i := range out {
 		if out[i].InkArea < s.MinBlockInk {
 			continue
 		}
-		out[i].Kind = ClassifyBlock(rgba, w, out[i], s)
 		filtered = append(filtered, out[i])
 	}
 	out = filtered
@@ -129,9 +129,13 @@ func Analyze(rgba []byte, w, h int, s Settings) AnalysisResult {
 // MergeTextBlocks gom dấu -> ký tự rồi gom các ký tự/từ trên cùng baseline.
 // Tầng này chỉ nối các bbox gần nhau theo hình học, không dilation toàn ảnh, nên
 // một dòng chữ không còn vỡ thành từng chữ nhưng các minh hoạ cách xa vẫn tách.
-func MergeTextBlocks(input []Block, w, h int) []Block {
+func MergeTextBlocks(input []Block, rgba []byte, w, h int) []Block {
 	if len(input) < 2 {
 		return input
+	}
+	colors := make([]Color, len(input))
+	for i := range input {
+		colors[i] = averageBlockColor(input[i], rgba, w)
 	}
 	parent := make([]int, len(input))
 	for i := range parent {
@@ -151,39 +155,27 @@ func MergeTextBlocks(input []Block, w, h int) []Block {
 		}
 	}
 
-	// Dấu tiếng Việt thường là một component nhỏ nằm ngay trên/dưới thân chữ.
+	// Dấu tiếng Việt chỉ được gắn vào thân chữ gần nhất. Việc chọn duy nhất một
+	// đích ngăn một dấu nhỏ tạo cầu nối dây chuyền giữa nhiều chữ/vật thể.
 	for i := range input {
+		best, bestScore := -1, int(^uint(0)>>1)
 		for j := range input {
-			if i == j || input[i].BBox.H*2 > input[j].BBox.H || input[i].InkArea*3 > input[j].InkArea*2 {
+			if i == j || input[j].BBox.H > maxInt(18, h/5) || input[i].BBox.H*2 > input[j].BBox.H || input[i].InkArea*3 > input[j].InkArea*2 {
 				continue
 			}
-			if horizontalOverlap(input[i].BBox, input[j].BBox) <= 0 {
+			if horizontalOverlap(input[i].BBox, input[j].BBox) <= 0 || colorDelta(colors[i], colors[j]) > 72 {
 				continue
 			}
-			if verticalGap(input[i].BBox, input[j].BBox) <= maxInt(3, input[j].BBox.H/2) {
-				join(i, j)
+			gap := maxInt(0, verticalGap(input[i].BBox, input[j].BBox))
+			if gap <= maxInt(3, input[j].BBox.H/3) {
+				score := gap*4 + absInt(rectCenterX(input[i].BBox)-rectCenterX(input[j].BBox))
+				if score < bestScore {
+					best, bestScore = j, score
+				}
 			}
 		}
-	}
-
-	// Nối các glyph/từ có cùng hàng. Ngưỡng theo chiều cao chữ để độc lập độ phân giải.
-	for i := range input {
-		for j := i + 1; j < len(input); j++ {
-			a, b := input[i].BBox, input[j].BBox
-			minH, maxH := minInt(a.H, b.H), maxInt(a.H, b.H)
-			if minH < 3 || maxH > maxInt(12, h/5) || maxH > minH*3 {
-				continue
-			}
-			gap := horizontalGap(a, b)
-			if gap < 0 || gap > maxInt(4, maxH*4/5) {
-				continue
-			}
-			overlap := verticalOverlap(a, b)
-			baselineDelta := absInt((a.Y + a.H) - (b.Y + b.H))
-			if overlap*2 < minH && baselineDelta*4 > maxH {
-				continue
-			}
-			join(i, j)
+		if best >= 0 {
+			join(i, best)
 		}
 	}
 
@@ -196,35 +188,136 @@ func MergeTextBlocks(input []Block, w, h int) []Block {
 		}
 		groups[r] = append(groups[r], i)
 	}
-	result := make([]Block, 0, len(groups))
+	parts := make([]Block, 0, len(groups))
 	for _, r := range order {
-		members := groups[r]
-		merged := input[members[0]]
-		if len(members) > 1 {
-			merged.Pixels = nil
-			merged.InkArea = 0
-			merged.BBox = Rect{X: w, Y: h}
-			maxX, maxY := 0, 0
-			weightedX, weightedY := 0.0, 0.0
-			for _, index := range members {
-				part := input[index]
-				merged.Pixels = append(merged.Pixels, part.Pixels...)
-				merged.InkArea += part.InkArea
-				weightedX += part.CentroidX * float64(part.InkArea)
-				weightedY += part.CentroidY * float64(part.InkArea)
-				merged.BBox.X = minInt(merged.BBox.X, part.BBox.X)
-				merged.BBox.Y = minInt(merged.BBox.Y, part.BBox.Y)
-				maxX = maxInt(maxX, part.BBox.X+part.BBox.W)
-				maxY = maxInt(maxY, part.BBox.Y+part.BBox.H)
-			}
-			merged.BBox.W, merged.BBox.H = maxX-merged.BBox.X, maxY-merged.BBox.Y
-			merged.CentroidX = weightedX / float64(merged.InkArea)
-			merged.CentroidY = weightedY / float64(merged.InkArea)
+		members := make([]Block, 0, len(groups[r]))
+		for _, index := range groups[r] {
+			members = append(members, input[index])
 		}
-		result = append(result, merged)
+		parts = append(parts, mergeBlocks(members, w, h))
+	}
+
+	// Lập từng hàng theo chiều cao + baseline của seed cố định, sau đó mới sắp xếp
+	// trái->phải và cắt theo khoảng trắng. Không union từng cặp xuyên hàng.
+	sort.SliceStable(parts, func(i, j int) bool {
+		if absInt(parts[i].BBox.Y-parts[j].BBox.Y) <= 3 {
+			return parts[i].BBox.X < parts[j].BBox.X
+		}
+		return parts[i].BBox.Y < parts[j].BBox.Y
+	})
+	used := make([]bool, len(parts))
+	result := make([]Block, 0, len(parts))
+	for seedIndex, seed := range parts {
+		if used[seedIndex] {
+			continue
+		}
+		if !isTextPart(seed, h) {
+			used[seedIndex] = true
+			result = append(result, seed)
+			continue
+		}
+		seedColor := averageBlockColor(seed, rgba, w)
+		rowIndices := make([]int, 0)
+		for candidateIndex, candidate := range parts {
+			if used[candidateIndex] || !isTextPart(candidate, h) {
+				continue
+			}
+			minH, maxH := minInt(seed.BBox.H, candidate.BBox.H), maxInt(seed.BBox.H, candidate.BBox.H)
+			baselineDelta := absInt((seed.BBox.Y + seed.BBox.H) - (candidate.BBox.Y + candidate.BBox.H))
+			if maxH*10 <= minH*15 && baselineDelta*10 <= maxH*7 && colorDelta(seedColor, averageBlockColor(candidate, rgba, w)) <= 58 {
+				rowIndices = append(rowIndices, candidateIndex)
+			}
+		}
+		sort.Slice(rowIndices, func(i, j int) bool { return parts[rowIndices[i]].BBox.X < parts[rowIndices[j]].BBox.X })
+		for start := 0; start < len(rowIndices); {
+			end := start + 1
+			for end < len(rowIndices) {
+				left, right := parts[rowIndices[end-1]], parts[rowIndices[end]]
+				maxH := maxInt(left.BBox.H, right.BBox.H)
+				gap := horizontalGap(left.BBox, right.BBox)
+				if gap < -maxH/3 || gap > maxInt(4, maxH*2/3) {
+					break
+				}
+				end++
+			}
+			run := make([]Block, 0, end-start)
+			for _, index := range rowIndices[start:end] {
+				used[index] = true
+				run = append(run, parts[index])
+			}
+			result = append(result, mergeBlocks(run, w, h))
+			start = end
+		}
 	}
 	return result
 }
+
+func isTextPart(block Block, imageHeight int) bool {
+	box := block.BBox
+	if box.H < 5 || box.H > maxInt(18, imageHeight/4) || box.W > maxInt(box.H*4, 40) {
+		return false
+	}
+	density := float64(block.InkArea) / float64(maxInt(1, box.W*box.H))
+	return density >= 0.04 && density <= 0.72
+}
+
+func mergeBlocks(parts []Block, w, h int) Block {
+	merged := parts[0]
+	if len(parts) == 1 {
+		return merged
+	}
+	merged.Pixels = nil
+	merged.InkArea = 0
+	merged.BBox = Rect{X: w, Y: h}
+	maxX, maxY := 0, 0
+	weightedX, weightedY := 0.0, 0.0
+	allVector := true
+	for _, part := range parts {
+		merged.Pixels = append(merged.Pixels, part.Pixels...)
+		merged.InkArea += part.InkArea
+		weightedX += part.CentroidX * float64(part.InkArea)
+		weightedY += part.CentroidY * float64(part.InkArea)
+		merged.BBox.X = minInt(merged.BBox.X, part.BBox.X)
+		merged.BBox.Y = minInt(merged.BBox.Y, part.BBox.Y)
+		maxX = maxInt(maxX, part.BBox.X+part.BBox.W)
+		maxY = maxInt(maxY, part.BBox.Y+part.BBox.H)
+		allVector = allVector && part.Kind == "vector"
+	}
+	merged.BBox.W, merged.BBox.H = maxX-merged.BBox.X, maxY-merged.BBox.Y
+	merged.CentroidX = weightedX / float64(merged.InkArea)
+	merged.CentroidY = weightedY / float64(merged.InkArea)
+	if allVector {
+		merged.Kind = "vector"
+	} else {
+		merged.Kind = "photo"
+	}
+	return merged
+}
+
+func averageBlockColor(block Block, rgba []byte, width int) Color {
+	if len(rgba) == 0 || width <= 0 || len(block.Pixels) == 0 {
+		return Color{}
+	}
+	r, g, b, count := 0, 0, 0, 0
+	step := maxInt(1, len(block.Pixels)/256)
+	for i := 0; i < len(block.Pixels); i += step {
+		offset := block.Pixels[i] * 4
+		if offset < 0 || offset+2 >= len(rgba) {
+			continue
+		}
+		r += int(rgba[offset])
+		g += int(rgba[offset+1])
+		b += int(rgba[offset+2])
+		count++
+	}
+	if count == 0 {
+		return Color{}
+	}
+	return Color{r / count, g / count, b / count}
+}
+
+func colorDelta(a, b Color) int { return absInt(a.R-b.R) + absInt(a.G-b.G) + absInt(a.B-b.B) }
+func rectCenterX(rect Rect) int { return rect.X + rect.W/2 }
 
 func horizontalGap(a, b Rect) int     { return maxInt(a.X, b.X) - minInt(a.X+a.W, b.X+b.W) }
 func verticalGap(a, b Rect) int       { return maxInt(a.Y, b.Y) - minInt(a.Y+a.H, b.Y+b.H) }
