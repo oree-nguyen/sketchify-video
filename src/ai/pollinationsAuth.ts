@@ -1,6 +1,7 @@
 const ACCESS_KEY_STORAGE = 'wb.pollinations.key'
 const APP_KEY_STORAGE = 'wb.pollinations.app-key'
 const AUTH_STATE_STORAGE = 'wb.pollinations.auth-state'
+const AUTH_RETURN_URL_STORAGE = 'wb.pollinations.return-url'
 
 export function getPollinationsAccessKey(): string | null {
   const value = localStorage.getItem(ACCESS_KEY_STORAGE)
@@ -24,12 +25,18 @@ export function disconnectPollinations(): void {
   localStorage.removeItem(ACCESS_KEY_STORAGE)
 }
 
+/** The exact URI that must be registered on the Pollinations App Key. */
+export function getPollinationsRedirectUri(): string {
+  return new URL('auth/callback/', document.baseURI).href
+}
+
 export function beginPollinationsAuth(appKey: string): void {
   if (!appKey.startsWith('pk_')) throw new Error('Chưa cấu hình App Key Pollinations hợp lệ.')
   const stateBytes = crypto.getRandomValues(new Uint8Array(24))
   const state = Array.from(stateBytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
   sessionStorage.setItem(AUTH_STATE_STORAGE, state)
-  const callback = new URL('auth/callback/', document.baseURI).href
+  sessionStorage.setItem(AUTH_RETURN_URL_STORAGE, new URL(document.baseURI).href)
+  const callback = getPollinationsRedirectUri()
   const params = new URLSearchParams({
     client_id: appKey,
     redirect_uri: callback,

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type DragEvent, type PointerEvent } from 'react'
 import { fitRect } from './camera/cameraTimeline'
 import { EditPanel, HandPanel } from './components/EditorControls'
-import { FramePanel, HorizontalTimeline } from './components/FrameTimeline'
+import { FramePanel } from './components/FrameTimeline'
 import { AIGenerationDialog } from './components/AIGenerationDialog'
-import { beginPollinationsAuth, consumeAuthCallbackResult, disconnectPollinations, getPollinationsAccessKey, getPollinationsAppKey, savePollinationsAppKey } from './ai/pollinationsAuth'
+import { beginPollinationsAuth, consumeAuthCallbackResult, disconnectPollinations, getPollinationsAccessKey, getPollinationsAppKey, getPollinationsRedirectUri, savePollinationsAppKey } from './ai/pollinationsAuth'
 import { generateImage as pollinationsGenerateImage, generateSpeech, generateStoryScript } from './ai/pollinationsClient'
 import type { StoryProgress, StoryScene, StorySceneFailure } from './ai/types'
 import { ProjectPlayer } from './render/ProjectPlayer'
@@ -17,7 +17,6 @@ export default function App() {
   const [analyses, setAnalyses] = useState<Record<number, Analysis>>({})
   const [analysisStatus, setAnalysisStatus] = useState<'idle' | 'working' | 'error'>('idle')
   const [isPlaying, setIsPlaying] = useState(false)
-  const [horizontal, setHorizontal] = useState(false)
   const [panel, setPanel] = useState<'hand' | 'edit'>('hand')
   const [editScope, setEditScope] = useState<'object' | 'frame'>('object')
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null)
@@ -25,6 +24,7 @@ export default function App() {
   const [showRender, setShowRender] = useState(false)
   const [showInkMask, setShowInkMask] = useState(false)
   const [aiDialogOpen, setAiDialogOpen] = useState(false)
+  const [aiDialogMode, setAiDialogMode] = useState<'choose' | 'connection'>('choose')
   const [aiConnected, setAiConnected] = useState(() => Boolean(getPollinationsAccessKey()))
   const [aiBusy, setAiBusy] = useState(false)
   const [aiProgress, setAiProgress] = useState<StoryProgress | null>(null)
@@ -53,6 +53,7 @@ export default function App() {
     const result = consumeAuthCallbackResult()
     if (result) {
       setAiConnected(result === 'connected')
+      setAiDialogMode('choose')
       setAiDialogOpen(true)
       setAiProgress({ phase: result === 'connected' ? 'done' : 'script', message: result === 'connected' ? 'Đã kết nối Pollinations. Bạn có thể tạo nội dung.' : 'Kết nối bị từ chối hoặc state không hợp lệ.' })
     }
@@ -176,6 +177,15 @@ export default function App() {
     return key
   }
 
+  const openAiDialog = (mode: 'choose' | 'connection' = 'choose') => {
+    setAiDialogMode(mode)
+    setAiDialogOpen(true)
+  }
+
+  const connectPollinations = () => {
+    openAiDialog('connection')
+  }
+
   const addGeneratedImage = async (prompt: string, replaceFrameId?: number): Promise<Frame> => {
     const blob = await pollinationsGenerateImage(requireAiKey(), prompt.trim())
     const id = replaceFrameId ?? Date.now()
@@ -275,7 +285,7 @@ export default function App() {
   const regenerateFrame = async (frame: Frame) => {
     const prompt = frame.aiGeneration?.prompt
     if (!prompt || !window.confirm('Tạo lại sẽ tiêu thêm Pollen và thay ảnh hiện tại. Tiếp tục?')) return
-    setAiDialogOpen(true); setAiBusy(true); setAiProgress({ phase: 'image', scene: 1, total: 1, message: 'Đang tạo lại ảnh…' })
+    openAiDialog('choose'); setAiBusy(true); setAiProgress({ phase: 'image', scene: 1, total: 1, message: 'Đang tạo lại ảnh…' })
     try { await addGeneratedImage(prompt, frame.id); setAiProgress({ phase: 'done', message: 'Đã tạo lại ảnh và phân tích lại khung.' }) }
     catch (error) { setAiProgress({ phase: 'script', message: errorMessage(error) }) }
     finally { setAiBusy(false) }
@@ -348,11 +358,7 @@ export default function App() {
     <header className="topbar">
       <div className="brand"><span className="brand-mark">S</span><span>Sketchify <b>Video</b></span><small>LOCAL EDITOR</small></div>
       <div className="top-actions">
-        <button className={`ai-connect ${aiConnected ? 'connected' : ''}`} onClick={() => {
-          const appKey = getPollinationsAppKey()
-          if (!aiConnected && appKey) beginPollinationsAuth(appKey)
-          else setAiDialogOpen(true)
-        }}>{aiConnected ? 'AI đã kết nối' : 'Kết nối AI'}</button>
+        <button className={`ai-connect ${aiConnected ? 'connected' : ''}`} onClick={() => aiConnected ? openAiDialog() : connectPollinations()}>{aiConnected ? 'AI đã kết nối' : 'Kết nối AI'}</button>
         <button className="quiet" disabled={!active} onClick={() => void play(false)}>{isPlaying ? 'Dừng' : 'Xem thử'}</button>
         <button className="export" disabled={!active || !supported || isPlaying} onClick={() => void play(true)}>Tạo .webm</button>
         {videoUrl && <a className="quiet" href={videoUrl} download="sketchify-video.webm">Tải video</a>}
@@ -360,8 +366,8 @@ export default function App() {
       </div>
     </header>
 
-    <section className={`workspace ${horizontal ? 'is-horizontal' : ''}`}>
-      {!horizontal && <FramePanel frames={project.frames} activeId={active?.id} select={selectFrame} upload={() => fileRef.current?.click()} create={() => setAiDialogOpen(true)} regenerate={(frame) => void regenerateFrame(frame)} drop={handleDrop} horizontal={() => setHorizontal(true)} onPointerMove={handleSpotlight} />}
+    <section className="workspace">
+      <FramePanel frames={project.frames} activeId={active?.id} select={selectFrame} upload={() => fileRef.current?.click()} create={() => openAiDialog()} regenerate={(frame) => void regenerateFrame(frame)} drop={handleDrop} connectPollinations={connectPollinations} onPointerMove={handleSpotlight} />
       <section className="stage spotlight-surface" onPointerMove={handleSpotlight}>
         <div className="stage-topline"><span>{active ? `KHUNG ${project.frames.findIndex((frame) => frame.id === active.id) + 1}` : 'SẴN SÀNG'}</span><span className="stage-diagnostics">{analysis && !showRender && <button className={`mask-toggle ${showInkMask ? 'active' : ''}`} type="button" aria-pressed={showInkMask} onClick={() => setShowInkMask((value) => !value)}>Ink mask</button>}<span>{analysisStatus === 'working' ? 'Đang phân tích bằng WASM…' : analysis ? `${analysis.blocks.length} vật thể đã tách` : analysisStatus === 'error' ? 'Không thể phân tích ảnh' : 'Thêm ảnh để bắt đầu'}</span></span></div>
         <div className={`preview ${showRender ? 'has-render' : ''}`}>
@@ -381,11 +387,10 @@ export default function App() {
               }} style={{ left: `${block.bbox.x / analysis.img.w * 100}%`, top: `${block.bbox.y / analysis.img.h * 100}%`, width: `${block.bbox.w / analysis.img.w * 100}%`, height: `${block.bbox.h / analysis.img.h * 100}%` }}><b>{object ? object.settings.order + 1 : block.id + 1}</b></button>
             })}</div>}
           </div>}
-          {!active && <div className="empty-preview"><strong>Biến ảnh thành câu chuyện được vẽ</strong><p>Tải ảnh của bạn hoặc để AI tạo trọn storyboard tiếng Việt.</p><div className="empty-actions"><button className="export" onClick={() => fileRef.current?.click()}>Tải ảnh lên</button><button className="quiet" onClick={() => setAiDialogOpen(true)}>Tạo video từ chủ đề…</button></div></div>}
+          {!active && <div className="empty-preview"><strong>Biến ảnh thành câu chuyện được vẽ</strong><p>Tải ảnh của bạn hoặc để AI tạo trọn storyboard tiếng Việt.</p><div className="empty-actions"><button className="export" onClick={() => fileRef.current?.click()}>Tải ảnh lên</button><button className="quiet" onClick={() => openAiDialog()}>Tạo video từ chủ đề…</button></div></div>}
         </div>
         <div className="transport"><button disabled={isPlaying} onClick={() => setProgress(Math.max(0, progress - 10))}>−10</button><button className="play" disabled={!active} onClick={() => void play(false)}>{isPlaying ? 'Ⅱ' : '▶'}</button><button disabled={isPlaying} onClick={() => setProgress(Math.min(total, progress + 10))}>+10</button><span className="duration">{formatTime(progress)} / {formatTime(total)}</span></div>
         <input aria-label="Playhead" className="scrubber range-input" type="range" min="0" max={Math.max(total, 1)} step=".1" value={Math.min(progress, total)} style={{ '--range-progress': `${rangeProgress}%` } as CSSProperties} onChange={(event) => setProgress(Number(event.target.value))} />
-        {horizontal && <HorizontalTimeline frames={project.frames} activeId={active?.id} select={selectFrame} upload={() => fileRef.current?.click()} create={() => setAiDialogOpen(true)} regenerate={(frame) => void regenerateFrame(frame)} drop={handleDrop} vertical={() => setHorizontal(false)} />}
       </section>
       <aside className="inspector spotlight-surface" onPointerMove={handleSpotlight}>
         <nav className="tool-rail"><button className={panel === 'hand' ? 'active' : ''} onClick={() => setPanel('hand')} aria-label="Bàn tay" title="Bàn tay">✎</button>{active && <button className={panel === 'edit' ? 'active' : ''} onClick={() => setPanel('edit')} aria-label="Chỉnh sửa" title="Chỉnh sửa">☷</button>}</nav>
@@ -396,7 +401,7 @@ export default function App() {
       </aside>
     </section>
     <input ref={fileRef} hidden type="file" accept="image/png,image/jpeg" onChange={handleFile} />
-    <AIGenerationDialog open={aiDialogOpen} connected={aiConnected} busy={aiBusy} progress={aiProgress} failures={aiFailures}
+    <AIGenerationDialog open={aiDialogOpen} initialMode={aiDialogMode} redirectUri={getPollinationsRedirectUri()} savedAppKey={getPollinationsAppKey()} connected={aiConnected} busy={aiBusy} progress={aiProgress} failures={aiFailures}
       close={() => { if (!aiBusy) setAiDialogOpen(false) }} upload={() => fileRef.current?.click()}
       connect={(appKey) => { savePollinationsAppKey(appKey); beginPollinationsAuth(appKey) }}
       disconnect={() => { disconnectPollinations(); setAiConnected(false); setAiProgress({ phase: 'script', message: 'Đã ngắt kết nối Pollinations.' }) }}

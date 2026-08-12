@@ -11,7 +11,7 @@ interface TimelineProps {
   regenerate: (frame: Frame) => void
 }
 
-export function FramePanel({ frames, activeId, select, drop, create, regenerate, horizontal, onPointerMove }: TimelineProps & { horizontal: () => void; onPointerMove: PointerEventHandler<HTMLElement> }) {
+export function FramePanel({ frames, activeId, select, drop, create, regenerate, connectPollinations, onPointerMove }: TimelineProps & { connectPollinations: () => void; onPointerMove: PointerEventHandler<HTMLElement> }) {
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const nodes = useRef(new Map<number, HTMLElement>())
   const before = useRef(new Map<number, DOMRect>())
@@ -63,20 +63,8 @@ export function FramePanel({ frames, activeId, select, drop, create, regenerate,
       </article>)}
       <UploadCard number={frames.length + 1} upload={create} drop={drop} />
     </div>
-    <button className="timeline-switch" onClick={horizontal}>↔ Chuyển timeline sang ngang</button>
+    <button className="pollinations-connect" type="button" onClick={connectPollinations}>Liên kết Pollinations.ai</button>
   </aside>
-}
-
-export function HorizontalTimeline({ frames, activeId, select, drop, create, vertical }: TimelineProps & { vertical: () => void }) {
-  return <div className="horizontal-timeline">
-    <div className="panel-heading"><span>TIMELINE</span><button onClick={vertical}>Đổi sang dọc</button></div>
-    <div className="horizontal-frames">
-      {frames.map((frame, index) => <button className={`strip-frame ${frame.id === activeId ? 'selected' : ''}`} key={frame.id} onClick={() => select(frame.id)}>
-        <img src={frame.sourceUrl} alt="" /><span>#{index + 1}</span>
-      </button>)}
-      <UploadCard number={frames.length + 1} upload={create} drop={drop} />
-    </div>
-  </div>
 }
 
 function UploadCard({ number, upload, drop }: { number: number; upload: () => void; drop: (event: DragEvent) => void }) {

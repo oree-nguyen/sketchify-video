@@ -9,12 +9,19 @@
       const key = params.get('api_key');
       const state = params.get('state');
       const expected = sessionStorage.getItem('wb.pollinations.auth-state');
+      const savedReturnUrl = sessionStorage.getItem('wb.pollinations.return-url');
       const ok = Boolean(key && key.startsWith('sk_') && state && expected && state === expected);
       if (ok) localStorage.setItem('wb.pollinations.key', key);
       sessionStorage.removeItem('wb.pollinations.auth-state');
+      sessionStorage.removeItem('wb.pollinations.return-url');
       sessionStorage.setItem('wb.pollinations.callback-result', ok ? 'connected' : 'denied');
       document.getElementById('status').textContent = ok ? 'Đã kết nối. Đang trở về Sketchify Video…' : 'Không thể xác nhận kết nối. Đang trở về ứng dụng…';
-      location.replace(new URL('../../', location.href));
+      let returnUrl = null;
+      try {
+        const candidate = new URL(savedReturnUrl || '');
+        if (candidate.origin === location.origin) returnUrl = candidate.href;
+      } catch (_) {}
+      location.replace(returnUrl || new URL('../../', location.href));
     })();
   </script>
 </body>

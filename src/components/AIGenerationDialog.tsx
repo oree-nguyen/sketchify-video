@@ -14,6 +14,9 @@ interface Props {
   generateImage: (prompt: string) => Promise<void>
   generateStory: (topic: string, sceneCount?: number) => Promise<void>
   retryFailure: (failure: StorySceneFailure) => Promise<void>
+  initialMode: 'choose' | 'connection'
+  redirectUri: string
+  savedAppKey: string | null
 }
 
 export function AIGenerationDialog(props: Props) {
@@ -31,6 +34,14 @@ export function AIGenerationDialog(props: Props) {
     if (!props.open && dialog.open) dialog.close()
   }, [props.open])
 
+  useEffect(() => {
+    if (props.open) setMode(props.initialMode)
+  }, [props.open, props.initialMode])
+
+  useEffect(() => {
+    if (props.open && props.initialMode === 'connection') setAppKey(props.savedAppKey ?? '')
+  }, [props.open, props.initialMode, props.savedAppKey])
+
   return <dialog ref={dialogRef} className="ai-dialog" onCancel={(event) => { if (props.busy) event.preventDefault(); else props.close() }}>
     <div className="ai-dialog-head">
       <div><span>NGUỒN NỘI DUNG</span><h2>{mode === 'story' ? 'Tạo video từ chủ đề' : mode === 'image' ? 'Tạo ảnh bằng AI' : mode === 'connection' ? 'Kết nối Pollinations' : 'Thêm khung hình'}</h2></div>
@@ -44,7 +55,9 @@ export function AIGenerationDialog(props: Props) {
     </div>}
 
     {mode === 'connection' && <div className="ai-form">
-      <p>App Key là mã công khai <code>pk_…</code> nhận từ Pollinations. Sau khi bấm kết nối, bạn sẽ duyệt ngân sách và thời hạn trên trang Pollinations.</p>
+      <p>App Key là mã công khai <code>pk_…</code> nhận từ Pollinations. Trước khi kết nối, hãy thêm chính xác callback này vào mục <b>Redirect URIs</b> của App Key:</p>
+      <div className="redirect-uri"><code>{props.redirectUri}</code><button type="button" className="quiet" onClick={() => void navigator.clipboard?.writeText(props.redirectUri)}>Sao chép URI</button></div>
+      <p>URI phải khớp tuyệt đối. Khi chạy local, hãy đăng ký URI localhost này; khi dùng GitHub Pages, hãy đăng ký URI GitHub Pages hiển thị ở đó.</p>
       <label>App Key Pollinations<input value={appKey} onChange={(event) => setAppKey(event.target.value)} placeholder="pk_…" autoComplete="off" /></label>
       <button className="export" disabled={!appKey.trim().startsWith('pk_')} onClick={() => props.connect(appKey.trim())}>Kết nối pollinations.ai</button>
       {props.connected && <button className="quiet" onClick={props.disconnect}>Ngắt kết nối hiện tại</button>}
