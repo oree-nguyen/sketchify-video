@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_SETTINGS } from './settingsDefaults'
-import { frameDrawDurationSec, frameDurationSec, objectDropInsertionIndex, reconcileFrameObjects, reorderFrameObjects, retimeAnalysisForFrame, setObjectOrder, updateObjectSettings, type Frame, type Project } from './projectStore'
+import { frameDrawDurationSec, frameDurationSec, mergeFrameObjects, objectDropInsertionIndex, reconcileFrameObjects, reorderFrameObjects, retimeAnalysisForFrame, setObjectOrder, updateObjectSettings, type Frame, type Project } from './projectStore'
 import type { Analysis, Block } from '../wasm/wasmClient'
 
 const block = (id: number, x: number): Block => ({
@@ -74,5 +74,17 @@ describe('FrameObject contract', () => {
     const reconciled = reconcileFrameObjects(frame.id, moved, frame.objects)
     expect(reconciled.find((object) => object.blockId === 91)?.settings.drawDurationSec).toBe(9)
     expect(reconciled.find((object) => object.blockId === 91)?.settings.pushEntry).toEqual({ enabled: true, edge: 'right' })
+  })
+
+  it('gom nhiều vật thể thành một block thật và giữ toàn bộ DrawUnit', () => {
+    const frame = makeFrame(5, [block(10, 0), block(20, 14), block(30, 60)])
+    const source = analysis([block(10, 0), block(20, 14), block(30, 60)])
+    const result = mergeFrameObjects(frame, source, [frame.objects[0].objectId, frame.objects[1].objectId])
+    expect(result).not.toBeNull()
+    expect(result!.frame.objects).toHaveLength(2)
+    expect(result!.analysis.blocks).toHaveLength(2)
+    expect(result!.analysis.blocks.find((item) => item.id === 10)?.bbox).toEqual({ x: 0, y: 0, w: 24, h: 10 })
+    expect(result!.analysis.units.filter((unit) => unit.blockId === 10)).toHaveLength(4)
+    expect(result!.frame.objects[0].settings.drawDurationSec).toBe(4)
   })
 })

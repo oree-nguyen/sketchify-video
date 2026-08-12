@@ -207,6 +207,62 @@ export function setObjectPinCamera(project: Project, frameId: number, objectId: 
   return updateProjectFrame(project, frameId, (frame) => updateObjectSettings(frame, objectId, { pinCamera: pinned }))
 }
 
+export function mergeFrameObjects(frame: Frame, analysis: Analysis, objectIds: string[]): { frame: Frame; analysis: Analysis; objectId: string } | null {
+  const selectedSet = new Set(objectIds)
+  const selected = [...frame.objects].filter((object) => selectedSet.has(object.objectId)).sort((a, b) => a.settings.order - b.settings.order)
+  if (selected.length < 2) return null
+  const blockIds = new Set(selected.map((object) => object.blockId))
+  const sourceBlocks = analysis.blocks.filter((block) => blockIds.has(block.id))
+  if (sourceBlocks.length < 2) return null
+
+  const x = Math.min(...sourceBlocks.map((block) => block.bbox.x))
+  const y = Math.min(...sourceBlocks.map((block) => block.bbox.y))
+  const right = Math.max(...sourceBlocks.map((block) => block.bbox.x + block.bbox.w))
+  const bottom = Math.max(...sourceBlocks.map((block) => block.bbox.y + block.bbox.h))
+  const inkArea = sourceBlocks.reduce((sum, block) => sum + block.inkArea, 0)
+  const id = Math.min(...sourceBlocks.map((block) => block.id))
+  const mergedBlock: Block = {
+    ...sourceBlocks[0], id,
+    bbox: { x, y, w: right - x, h: bottom - y }, x, y, width: right - x, height: bottom - y,
+    centroid: {
+      x: sourceBlocks.reduce((sum, block) => sum + block.centroid.x * block.inkArea, 0) / Math.max(1, inkArea),
+      y: sourceBlocks.reduce((sum, block) => sum + block.centroid.y * block.inkArea, 0) / Math.max(1, inkArea),
+    },
+    inkArea, area: inkArea,
+    pixels: sourceBlocks.flatMap((block) => block.pixels),
+    kind: sourceBlocks.some((block) => block.kind === 'photo') ? 'photo' : 'vector',
+  }
+  const first = selected[0]
+  const objectId = `group:${frame.id}:${[...blockIds].sort((a, b) => a - b).join('-')}`
+  const grouped: FrameObject = {
+    objectId, blockId: id, bbox: mergedBlock.bbox, centroid: mergedBlock.centroid,
+    kind: mergedBlock.kind, inkArea,
+    settings: {
+      ...first.settings, objectId, blockId: id,
+      order: Math.min(...selected.map((object) => object.settings.order)),
+      drawDurationSec: selected.reduce((sum, object) => sum + object.settings.drawDurationSec, 0),
+      pinCamera: selected.some((object) => object.settings.pinCamera),
+      pushEntry: selected.find((object) => object.settings.pushEntry.enabled)?.settings.pushEntry ?? first.settings.pushEntry,
+    },
+  }
+  const objects = [...frame.objects.filter((object) => !selectedSet.has(object.objectId)), grouped]
+    .sort((a, b) => a.settings.order - b.settings.order)
+    .map((object, order) => ({ ...object, settings: { ...object.settings, order } }))
+  const blocks = [...analysis.blocks.filter((block) => !blockIds.has(block.id)), mergedBlock]
+    .sort((a, b) => {
+      const ao = objects.find((object) => object.blockId === a.id)?.settings.order ?? Number.MAX_SAFE_INTEGER
+      const bo = objects.find((object) => object.blockId === b.id)?.settings.order ?? Number.MAX_SAFE_INTEGER
+      return ao - bo
+    })
+  const units = analysis.units.map((unit) => blockIds.has(unit.blockId) ? { ...unit, blockId: id } : unit)
+  const nextAnalysis: Analysis = { ...analysis, blocks, units, stats: { ...analysis.stats, blocks: blocks.length } }
+  return {
+    objectId,
+    frame: syncFrameDuration({ ...frame, objects, analysis: nextAnalysis }),
+    analysis: nextAnalysis,
+  }
+}
+
 export function reorderFrameObjects(frame: Frame, fromObjectId: string, toObjectId: string): Frame {
   const objects = [...frame.objects].sort((a, b) => a.settings.order - b.settings.order)
   const from = objects.findIndex((object) => object.objectId === fromObjectId)

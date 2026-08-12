@@ -8,6 +8,24 @@ func TestGray(t *testing.T) {
 		t.Fatal(g)
 	}
 }
+
+func TestMergeTextBlocksGroupsGlyphRunButNotSeparateIllustration(t *testing.T) {
+	blocks := []Block{
+		{BBox: Rect{X: 10, Y: 12, W: 8, H: 22}, InkArea: 80, CentroidX: 14, CentroidY: 23, Pixels: []int{1}},
+		{BBox: Rect{X: 21, Y: 12, W: 9, H: 22}, InkArea: 90, CentroidX: 25, CentroidY: 23, Pixels: []int{2}},
+		{BBox: Rect{X: 34, Y: 12, W: 8, H: 22}, InkArea: 85, CentroidX: 38, CentroidY: 23, Pixels: []int{3}},
+		{BBox: Rect{X: 45, Y: 12, W: 9, H: 22}, InkArea: 90, CentroidX: 49, CentroidY: 23, Pixels: []int{4}},
+		{BBox: Rect{X: 57, Y: 12, W: 9, H: 22}, InkArea: 90, CentroidX: 61, CentroidY: 23, Pixels: []int{5}},
+		{BBox: Rect{X: 120, Y: 55, W: 60, H: 70}, InkArea: 900, CentroidX: 150, CentroidY: 90, Pixels: []int{6}},
+	}
+	merged := MergeTextBlocks(blocks, 240, 160)
+	if len(merged) != 2 {
+		t.Fatalf("expected one text object plus one illustration, got %d", len(merged))
+	}
+	if merged[0].BBox.X != 10 || merged[0].BBox.W != 56 || merged[0].InkArea != 435 {
+		t.Fatalf("unexpected merged text block: %+v", merged[0])
+	}
+}
 func TestSobel(t *testing.T) {
 	g := make([]uint8, 25)
 	for y := 0; y < 5; y++ {

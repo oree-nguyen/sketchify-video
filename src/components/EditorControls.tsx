@@ -43,7 +43,10 @@ interface EditPanelProps {
   scope: 'object' | 'frame'
   setScope: (scope: 'object' | 'frame') => void
   selectedObjectId: string | null
+  selectedObjectIds: string[]
   selectObject: (objectId: string | null) => void
+  toggleObjectSelection: (objectId: string) => void
+  groupSelectedObjects: () => void
   updateFrameSettings: (patch: Partial<FrameSettings>) => void
   updateTransition: (patch: Partial<Frame['transitionToNext']>) => void
   updateObject: (objectId: string, patch: Partial<ObjectSettings>) => void
@@ -53,7 +56,7 @@ interface EditPanelProps {
   removeFrame: () => void
 }
 
-export function EditPanel({ frame, analysis, last, scope, setScope, selectedObjectId, selectObject, updateFrameSettings, updateTransition, updateObject, reorderObject, audioClip, removeAudio, removeFrame }: EditPanelProps) {
+export function EditPanel({ frame, analysis, last, scope, setScope, selectedObjectId, selectedObjectIds, selectObject, toggleObjectSelection, groupSelectedObjects, updateFrameSettings, updateTransition, updateObject, reorderObject, audioClip, removeAudio, removeFrame }: EditPanelProps) {
   const draggedObjectId = useRef<string | null>(null)
   const dropElement = useRef<HTMLElement | null>(null)
   const drawDuration = frameDrawDurationSec(frame)
@@ -70,9 +73,10 @@ export function EditPanel({ frame, analysis, last, scope, setScope, selectedObje
     <div className="settings-accordion">
       {scope === 'object' && <Accordion title="Vật thể" meta={`${frame.objects.length} · ${formatSec(drawDuration)} vẽ`} open>
         {!frame.objects.length && <p className="empty-objects">Đang chờ kết quả phân tích để tạo danh sách vật thể…</p>}
+        {frame.objects.length > 0 && <div className="object-group-toolbar"><span>{selectedObjectIds.length} vật thể đã chọn</span><button type="button" disabled={selectedObjectIds.length < 2} onClick={groupSelectedObjects}>Gom nhóm</button></div>}
         <div className="object-list" aria-label="Danh sách vật thể">
           {[...frame.objects].sort((a, b) => a.settings.order - b.settings.order).map((object) => <article
-            className={`object-row ${selected?.objectId === object.objectId ? 'selected' : ''}`}
+            className={`object-row ${selectedObjectIds.includes(object.objectId) ? 'selected' : ''}`}
             key={object.objectId}
             data-object-id={object.objectId}
             data-block-id={object.blockId}
@@ -84,6 +88,7 @@ export function EditPanel({ frame, analysis, last, scope, setScope, selectedObje
             onDrop={(event) => dropObject(event, object.objectId, draggedObjectId, dropElement, reorderObject)}
             onClick={() => selectObject(object.objectId)}
           >
+            <label className="object-select" title="Chọn để gom nhóm" onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={selectedObjectIds.includes(object.objectId)} onChange={() => toggleObjectSelection(object.objectId)} /><span aria-hidden="true" /></label>
             <span className="object-grip" aria-hidden="true">⠿</span>
             <ObjectThumbnail analysis={analysis} object={object} />
             <span className="object-summary"><b>#{object.settings.order + 1} <em>{object.settings.kindOverride ?? object.kind}</em></b><small>{object.inkArea} ink · {object.bbox.w}×{object.bbox.h}px</small>{selected?.objectId === object.objectId && <small className="timeline-clean">Timeline đã cập nhật</small>}</span>

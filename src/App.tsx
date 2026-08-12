@@ -7,7 +7,7 @@ import { beginPollinationsAuth, consumeAuthCallbackResult, disconnectPollination
 import { generateImage as pollinationsGenerateImage, generateSpeech, generateStoryScript } from './ai/pollinationsClient'
 import type { StoryProgress, StoryScene, StorySceneFailure } from './ai/types'
 import { ProjectPlayer } from './render/ProjectPlayer'
-import { createFrame, createFrameFromSource, objectDropInsertionIndex, reconcileFrameObjects, setFrameCamera, setFrameHold, setFramePageZoom, setFrameTransition, setObjectDuration, setObjectEffect, setObjectOrder, setObjectPinCamera, setObjectPush, syncFrameDuration, type AudioClip, type Frame, type ObjectSettings, type Project } from './state/projectStore'
+import { createFrame, createFrameFromSource, mergeFrameObjects, objectDropInsertionIndex, reconcileFrameObjects, setFrameCamera, setFrameHold, setFramePageZoom, setFrameTransition, setObjectDuration, setObjectEffect, setObjectOrder, setObjectPinCamera, setObjectPush, syncFrameDuration, type AudioClip, type Frame, type ObjectSettings, type Project } from './state/projectStore'
 import type { FrameSettings } from './state/settingsDefaults'
 import { buildProjectTimeline } from './timeline/projectTimeline'
 import { analyzeImage, type Analysis } from './wasm/wasmClient'
@@ -20,6 +20,7 @@ export default function App() {
   const [panel, setPanel] = useState<'hand' | 'edit'>('hand')
   const [editScope, setEditScope] = useState<'object' | 'frame'>('object')
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null)
+  const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([])
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [showRender, setShowRender] = useState(false)
   const [showInkMask, setShowInkMask] = useState(false)
@@ -100,13 +101,14 @@ export default function App() {
   const addFile = (file?: File) => {
     if (!file?.type.startsWith('image/')) return
     const id = Date.now(), frame = createFrame(file, id)
-    setShowRender(false); setSelectedObjectId(null); setEditScope('object'); setPanel('edit')
+    setShowRender(false); setSelectedObjectId(null); setSelectedObjectIds([]); setEditScope('object'); setPanel('edit')
     setProject((current) => ({ ...current, frames: [...current.frames, frame], activeFrameId: id }))
   }
 
   const selectFrame = (id: number) => {
     const chosen = project.frames.find((frame) => frame.id === id)
-    setShowRender(false); setShowInkMask(false); setSelectedObjectId(chosen?.objects[0]?.objectId ?? null); setEditScope('object'); setPanel('edit')
+    const firstObjectId = chosen?.objects[0]?.objectId ?? null
+    setShowRender(false); setShowInkMask(false); setSelectedObjectId(firstObjectId); setSelectedObjectIds(firstObjectId ? [firstObjectId] : []); setEditScope('object'); setPanel('edit')
     setProject((current) => ({ ...current, activeFrameId: id }))
   }
 
@@ -131,7 +133,10 @@ export default function App() {
 
   useEffect(() => {
     if (!active?.objects.length || editScope === 'frame') return
-    if (!selectedObjectId || !active.objects.some((object) => object.objectId === selectedObjectId)) setSelectedObjectId(active.objects[0].objectId)
+    if (!selectedObjectId || !active.objects.some((object) => object.objectId === selectedObjectId)) {
+      setSelectedObjectId(active.objects[0].objectId)
+      setSelectedObjectIds([active.objects[0].objectId])
+    }
   }, [active?.id, active?.objects, selectedObjectId, editScope])
 
   const updateFrameSettings = (patch: Partial<FrameSettings>) => setProject((current) => {
@@ -171,6 +176,27 @@ export default function App() {
     return setObjectOrder(current, frame.id, fromObjectId, insertionIndex)
   })
 
+  const selectOnlyObject = (objectId: string | null) => {
+    setSelectedObjectId(objectId)
+    setSelectedObjectIds(objectId ? [objectId] : [])
+  }
+
+  const toggleObjectSelection = (objectId: string) => setSelectedObjectIds((current) => {
+    const next = current.includes(objectId) ? current.filter((id) => id !== objectId) : [...current, objectId]
+    setSelectedObjectId(next.at(-1) ?? null)
+    return next
+  })
+
+  const groupSelectedObjects = () => {
+    if (!active || !analysis || selectedObjectIds.length < 2) return
+    const result = mergeFrameObjects(active, analysis, selectedObjectIds)
+    if (!result) return
+    setAnalyses((current) => ({ ...current, [active.id]: result.analysis }))
+    setProject((current) => ({ ...current, frames: current.frames.map((frame) => frame.id === active.id ? result.frame : frame) }))
+    setSelectedObjectId(result.objectId)
+    setSelectedObjectIds([result.objectId])
+  }
+
   const requireAiKey = (): string => {
     const key = getPollinationsAccessKey()
     if (!key) throw new Error('Hãy kết nối Pollinations trước khi tạo nội dung.')
@@ -190,7 +216,7 @@ export default function App() {
     const blob = await pollinationsGenerateImage(requireAiKey(), prompt.trim())
     const id = replaceFrameId ?? Date.now()
     const generated = createFrameFromSource(blob, id, 'ai-generated', prompt.trim())
-    setPanel('edit'); setEditScope('frame'); setSelectedObjectId(null); setShowRender(false)
+    setPanel('edit'); setEditScope('frame'); setSelectedObjectId(null); setSelectedObjectIds([]); setShowRender(false)
     setProject((current) => {
       if (replaceFrameId === undefined) return { ...current, frames: [...current.frames, generated], activeFrameId: id }
       const previous = current.frames.find((frame) => frame.id === replaceFrameId)
@@ -303,6 +329,7 @@ export default function App() {
     project.audioClips.filter((clip) => clip.frameId === active.id).forEach((clip) => URL.revokeObjectURL(clip.sourceUrl))
     setAnalyses((all) => { const next = { ...all }; delete next[active.id]; return next })
     setSelectedObjectId(null)
+    setSelectedObjectIds([])
     setProject((current) => {
       const index = current.frames.findIndex((frame) => frame.id === active.id)
       const frames = current.frames.filter((frame) => frame.id !== active.id)
@@ -377,8 +404,8 @@ export default function App() {
             {analysis && showInkMask && <InkMaskOverlay analysis={analysis} />}
             {analysis && <div className="block-overlay">{analysis.blocks.map((block) => {
               const object = active.objects.find((item) => item.blockId === block.id)
-              return <button className={`block ${block.kind} ${object?.objectId === selectedObjectId ? 'selected' : ''}`} key={block.id} onClick={() => {
-                if (object) { setSelectedObjectId(object.objectId); setEditScope('object'); setPanel('edit') }
+              return <button className={`block ${block.kind} ${object && selectedObjectIds.includes(object.objectId) ? 'selected' : ''}`} key={block.id} onClick={() => {
+                if (object) { selectOnlyObject(object.objectId); setEditScope('object'); setPanel('edit') }
                 if (active.settings.camera.mode === 'B-manual-keyframe') {
                   const crop = fitRect(block.bbox, analysis.img.w / analysis.img.h, active.settings.camera.zoomPadding, analysis.img.w, analysis.img.h, active.settings.camera.zoomLevel)
                   const manualKeyframes = active.settings.camera.manualKeyframes.filter((key) => key.blockId !== block.id)
@@ -396,7 +423,7 @@ export default function App() {
         <nav className="tool-rail"><button className={panel === 'hand' ? 'active' : ''} onClick={() => setPanel('hand')} aria-label="Bàn tay" title="Bàn tay">✎</button>{active && <button className={panel === 'edit' ? 'active' : ''} onClick={() => setPanel('edit')} aria-label="Chỉnh sửa" title="Chỉnh sửa">☷</button>}</nav>
         <div className="inspector-body">{panel === 'hand' || !active
           ? <HandPanel style={project.handStyle} setStyle={(handStyle) => setProject((current) => ({ ...current, handStyle }))} />
-          : <EditPanel frame={active} analysis={analysis} last={project.frames.at(-1)?.id === active.id} scope={editScope} setScope={setEditScope} selectedObjectId={selectedObjectId} selectObject={setSelectedObjectId} updateFrameSettings={updateFrameSettings} updateTransition={updateTransition} updateObject={updateObject} reorderObject={reorderObject} audioClip={project.audioClips.find((clip) => clip.frameId === active.id)} removeAudio={removeActiveAudio} removeFrame={removeActiveFrame} />}
+          : <EditPanel frame={active} analysis={analysis} last={project.frames.at(-1)?.id === active.id} scope={editScope} setScope={setEditScope} selectedObjectId={selectedObjectId} selectedObjectIds={selectedObjectIds} selectObject={selectOnlyObject} toggleObjectSelection={toggleObjectSelection} groupSelectedObjects={groupSelectedObjects} updateFrameSettings={updateFrameSettings} updateTransition={updateTransition} updateObject={updateObject} reorderObject={reorderObject} audioClip={project.audioClips.find((clip) => clip.frameId === active.id)} removeAudio={removeActiveAudio} removeFrame={removeActiveFrame} />}
         </div>
       </aside>
     </section>

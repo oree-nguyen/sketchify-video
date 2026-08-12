@@ -49,7 +49,7 @@ export async function generateStoryScript(accessKey: string, request: StoryModeR
       model: 'openai', temperature: 0.5,
       response_format: { type: 'json_object' },
       messages: [
-        { role: 'system', content: 'Bạn viết storyboard video whiteboard tiếng Việt. Chỉ trả JSON hợp lệ dạng {"scenes":[{"order":1,"narrationText":"...","imagePrompt":"..."}]}. imagePrompt mô tả ảnh nền trắng, vật thể tách biệt, không chữ, phù hợp tách khối.' },
+        { role: 'system', content: 'Bạn viết storyboard video whiteboard tiếng Việt. Chỉ trả JSON hợp lệ dạng {"scenes":[{"order":1,"narrationText":"...","imagePrompt":"..."}]}. Mỗi imagePrompt phải mô tả một thumbnail giáo dục 16:9 nền trắng/xám rất nhạt, có 1 tiêu đề tiếng Việt ngắn ghi CHÍNH XÁC trong dấu ngoặc kép, chữ marker đậm màu đen/đỏ/xanh, cùng 2-5 cụm minh hoạ tách biệt (icon whiteboard hoặc một người thật ở trung tâm). Bố cục sạch, tương phản cao, nhiều khoảng trắng, không watermark, không chữ thừa.' },
         { role: 'user', content: `${countInstruction}\nChủ đề: ${request.topic}` },
       ],
     }),
@@ -61,9 +61,10 @@ export async function generateStoryScript(accessKey: string, request: StoryModeR
 }
 
 export async function generateImage(accessKey: string, prompt: string): Promise<Blob> {
+  const styledPrompt = `Create a clean 16:9 Vietnamese educational YouTube thumbnail in a whiteboard explainer style. White or very light gray paper background, high contrast, generous whitespace. Use one large, legible Vietnamese headline and preserve every quoted Vietnamese phrase EXACTLY, including accents. Combine bold black/red/green hand-drawn marker typography with 2 to 5 clearly separated visual clusters: simple outlined infographic icons, arrows, checkmarks, labels, and optionally one photorealistic Vietnamese presenter centered in the composition. Every text line must be horizontal with normal word spacing; do not scatter individual letters. Keep unrelated objects separated by clear white gaps so image segmentation can isolate them. No watermark, no logo unless explicitly requested, no tiny decorative text, no dense collage, no dark background. Subject and required wording: ${prompt.trim()}`
   const response = await requestWithRetry(`${API_ROOT}/v1/images/generations`, {
     method: 'POST', headers: authHeaders(accessKey, true),
-    body: JSON.stringify({ model: 'flux', prompt, size: '1024x1024', quality: 'medium', response_format: 'b64_json', n: 1, safe: true }),
+    body: JSON.stringify({ model: 'ideogram-v4-turbo', prompt: styledPrompt, width: 1536, height: 864, quality: 'medium', response_format: 'b64_json', n: 1, safe: true }),
   })
   const payload = await response.json() as { data?: Array<{ b64_json?: string; url?: string }> }
   const item = payload.data?.[0]

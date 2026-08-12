@@ -19,6 +19,10 @@ describe('Pollinations client contract', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ b64_json: btoa('png') }] }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       .mockResolvedValueOnce(new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'Content-Type': 'audio/mpeg' } }))
     expect((await generateImage('sk_test', 'ảnh')).type).toBe('image/png')
+    const imageRequest = JSON.parse(String(fetchMock.mock.calls[0][1]?.body)) as { model: string; prompt: string; width: number; height: number }
+    expect(imageRequest).toMatchObject({ model: 'ideogram-v4-turbo', width: 1536, height: 864 })
+    expect(imageRequest.prompt).toContain('Vietnamese educational YouTube thumbnail')
+    expect(imageRequest.prompt).toContain('ảnh')
     const audio = await generateSpeech('sk_test', 'xin chào')
     expect(audio.type).toBe('audio/mpeg')
     expect(audio.size).toBe(3)
