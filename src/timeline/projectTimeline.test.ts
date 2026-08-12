@@ -21,10 +21,11 @@ function frame(id: number, transition: TransitionType = 'none', transitionDurati
     durationSec: 10,
     analysis: null,
     dirty: false,
+    imageSource: 'upload',
   }
 }
 
-const project = (frames: Frame[]): Project => ({ frames, activeFrameId: frames[0]?.id ?? null, handStyle: 'pencil', playhead: { globalTimeSec: 0 } })
+const project = (frames: Frame[]): Project => ({ frames, activeFrameId: frames[0]?.id ?? null, handStyle: 'pencil', playhead: { globalTimeSec: 0 }, audioClips: [] })
 
 describe('buildProjectTimeline §11.6', () => {
   it('hai Frame 10 giây chạy liên tục trên trục 0→20 giây', () => {

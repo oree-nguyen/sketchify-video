@@ -18,7 +18,7 @@ const analysis = (blocks: Block[]): Analysis => ({
 const makeFrame = (id: number, blocks: Block[]): Frame => ({
   id, name: `Frame ${id}`, sourceUrl: '', settings: structuredClone(DEFAULT_SETTINGS),
   objects: reconcileFrameObjects(id, blocks), transitionToNext: { type: 'none', durationSec: 1 },
-  durationSec: 0, analysis: null, dirty: false,
+  durationSec: 0, analysis: null, dirty: false, imageSource: 'upload',
 })
 
 describe('FrameObject contract', () => {
@@ -59,7 +59,7 @@ describe('FrameObject contract', () => {
     expect(objectDropInsertionIndex(frame.objects, first.objectId, third.objectId, 'after')).toBe(2)
     expect(objectDropInsertionIndex(frame.objects, fourth.objectId, second.objectId, 'before')).toBe(1)
     expect(objectDropInsertionIndex(frame.objects, fourth.objectId, second.objectId, 'after')).toBe(2)
-    const project: Project = { frames: [frame], activeFrameId: frame.id, handStyle: 'pencil', playhead: { globalTimeSec: 0 } }
+    const project: Project = { frames: [frame], activeFrameId: frame.id, handStyle: 'pencil', playhead: { globalTimeSec: 0 }, audioClips: [] }
     const insertion = objectDropInsertionIndex(frame.objects, first.objectId, third.objectId, 'after')!
     const moved = setObjectOrder(project, frame.id, first.objectId, insertion).frames[0]
     expect(moved.objects.map((object) => object.blockId)).toEqual([20, 30, 10, 40])

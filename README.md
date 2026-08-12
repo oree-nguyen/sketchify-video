@@ -1,6 +1,6 @@
 # Sketchify Video
 
-Sketchify Video biến các ảnh PNG/JPG thành một video whiteboard gồm nhiều khung hình. Mọi xử lý diễn ra trong trình duyệt: không có tài khoản, backend, AI hoặc dữ liệu ảnh được tải lên máy chủ.
+Sketchify Video biến các ảnh PNG/JPG thành một video whiteboard gồm nhiều khung hình. Pipeline tách khối, vẽ, camera và xuất video chạy hoàn toàn trong trình duyệt; Pollinations AI là nguồn nội dung tuỳ chọn và chỉ gọi mạng khi người dùng bấm tạo ảnh/video.
 
 Giao diện hiện có timeline theo chiều dọc/ngang, preview, chọn một kiểu bàn tay dùng xuyên suốt dự án, thời lượng từng khung và hiệu ứng chuyển cảnh. Ảnh chụp màn hình sẽ được bổ sung khi có bản phát hành đầu tiên.
 
@@ -26,9 +26,21 @@ Thư mục đầu ra là `dist/`.
 
 Push lên nhánh `main`. Workflow [deploy.yml](.github/workflows/deploy.yml) sẽ build WASM, build Vite và deploy bằng GitHub Actions. Trên GitHub, bật **Settings → Pages → Source: GitHub Actions** một lần.
 
+## Pollinations AI (tuỳ chọn)
+
+Tạo App Key công khai (`pk_…`) tại Pollinations, đăng ký callback chính xác:
+
+```text
+https://oree-nguyen.github.io/sketchify-video/auth/callback/
+```
+
+Có thể nhập App Key trong hộp “Kết nối AI”, hoặc cấu hình `VITE_POLLINATIONS_APP_KEY` lúc build. Scoped access key của từng người dùng được lưu ở `localStorage` key `wb.pollinations.key`; ứng dụng không ghi key ra console. Mỗi lần tạo ảnh/giọng đọc tiêu Pollen của người dùng và UI luôn báo số lượt gọi ước tính trước khi chạy chế độ storyboard.
+
+Luồng BYOP dùng fragment redirect legacy mà Pollinations vẫn hỗ trợ cho client tĩnh. Kịch bản, ảnh và audio được gọi tuần tự; lỗi tại một cảnh không xoá các cảnh đã xong và có thể thử lại riêng cảnh lỗi.
+
 ## Hai thiết lập đáng chú ý
 
-- `mergeRadius`: khoảng cách dùng để gộp các vùng ảnh gần nhau. Tăng nếu ảnh có nhiều chi tiết vụn; giảm nếu các đối tượng khác nhau bị gộp nhầm.
+- `mergeRadius`: được cố định ở `0px` theo hợp đồng hiện tại và không hiển thị trong UI.
 - `orderMode`: cách sắp xếp thứ tự vẽ. Chế độ kể chuyện ưu tiên các khối nội dung có ý nghĩa thay vì chỉ quét theo tọa độ ảnh.
 
 ## Pipeline

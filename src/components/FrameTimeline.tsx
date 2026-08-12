@@ -7,11 +7,13 @@ interface TimelineProps {
   select: (id: number) => void
   upload: () => void
   drop: (event: DragEvent) => void
+  create: () => void
+  regenerate: (frame: Frame) => void
 }
 
-export function FramePanel({ frames, activeId, select, upload, drop, horizontal, onPointerMove }: TimelineProps & { horizontal: () => void; onPointerMove: PointerEventHandler<HTMLElement> }) {
+export function FramePanel({ frames, activeId, select, drop, create, regenerate, horizontal, onPointerMove }: TimelineProps & { horizontal: () => void; onPointerMove: PointerEventHandler<HTMLElement> }) {
   const [dragIndex, setDragIndex] = useState<number | null>(null)
-  const nodes = useRef(new Map<number, HTMLButtonElement>())
+  const nodes = useRef(new Map<number, HTMLElement>())
   const before = useRef(new Map<number, DOMRect>())
 
   const capturePositions = () => { before.current = new Map([...nodes.current].map(([id, node]) => [id, node.getBoundingClientRect()])) }
@@ -35,7 +37,7 @@ export function FramePanel({ frames, activeId, select, upload, drop, horizontal,
   return <aside className="frame-panel spotlight-surface" onPointerMove={onPointerMove}>
     <div className="panel-heading"><span>KHUNG HÌNH</span><small>{frames.length} / ∞</small></div>
     <div className="frame-stack">
-      {frames.map((frame, index) => <button
+      {frames.map((frame, index) => <article
         ref={(node) => { if (node) nodes.current.set(frame.id, node); else nodes.current.delete(frame.id) }}
         key={frame.id}
         draggable
@@ -49,26 +51,30 @@ export function FramePanel({ frames, activeId, select, upload, drop, horizontal,
           setDragIndex(null)
         }}
         className={`frame-card ${frame.id === activeId ? 'selected' : ''}`}
+        role="button"
+        tabIndex={0}
         onClick={() => select(frame.id)}
+        onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); select(frame.id) } }}
       >
         <span className="frame-index">{String(index + 1).padStart(2, '0')}</span>
         <img src={frame.sourceUrl} alt={frame.name} />
         <span>{frame.name}{frame.dirty ? ' · đang cập nhật' : ''}</span>
-      </button>)}
-      <UploadCard number={frames.length + 1} upload={upload} drop={drop} />
+        {frame.imageSource === 'ai-generated' && <span className="ai-frame-meta" title={frame.aiGeneration?.prompt}>{frame.aiGeneration?.prompt}<button type="button" onClick={(event) => { event.stopPropagation(); regenerate(frame) }}>Tạo lại</button></span>}
+      </article>)}
+      <UploadCard number={frames.length + 1} upload={create} drop={drop} />
     </div>
     <button className="timeline-switch" onClick={horizontal}>↔ Chuyển timeline sang ngang</button>
   </aside>
 }
 
-export function HorizontalTimeline({ frames, activeId, select, upload, drop, vertical }: TimelineProps & { vertical: () => void }) {
+export function HorizontalTimeline({ frames, activeId, select, drop, create, vertical }: TimelineProps & { vertical: () => void }) {
   return <div className="horizontal-timeline">
     <div className="panel-heading"><span>TIMELINE</span><button onClick={vertical}>Đổi sang dọc</button></div>
     <div className="horizontal-frames">
       {frames.map((frame, index) => <button className={`strip-frame ${frame.id === activeId ? 'selected' : ''}`} key={frame.id} onClick={() => select(frame.id)}>
         <img src={frame.sourceUrl} alt="" /><span>#{index + 1}</span>
       </button>)}
-      <UploadCard number={frames.length + 1} upload={upload} drop={drop} />
+      <UploadCard number={frames.length + 1} upload={create} drop={drop} />
     </div>
   </div>
 }

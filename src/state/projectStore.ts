@@ -38,6 +38,19 @@ export interface Frame {
   durationSec: number
   analysis: unknown | null
   dirty: boolean
+  imageSource: 'upload' | 'ai-generated'
+  aiGeneration?: { prompt: string; generatedAt: string }
+}
+
+export interface AudioClip {
+  id: string
+  frameId: number
+  name: string
+  sourceUrl: string
+  startSec: number
+  durationSec: number
+  narrationText?: string
+  source: 'upload' | 'ai-generated'
 }
 
 export interface Project {
@@ -45,19 +58,26 @@ export interface Project {
   activeFrameId: number | null
   handStyle: HandStyleId
   playhead: { globalTimeSec: number }
+  audioClips: AudioClip[]
 }
 
 export function createFrame(file: File, id: number): Frame {
+  return createFrameFromSource(file, id, 'upload')
+}
+
+export function createFrameFromSource(source: Blob, id: number, imageSource: Frame['imageSource'], prompt?: string, name?: string): Frame {
   return {
     id,
-    name: file.name,
-    sourceUrl: URL.createObjectURL(file),
+    name: name ?? (source instanceof File ? source.name : `Ảnh AI ${new Date().toLocaleTimeString('vi-VN')}.png`),
+    sourceUrl: URL.createObjectURL(source),
     settings: structuredClone(DEFAULT_SETTINGS),
     objects: [],
     transitionToNext: { type: 'none', durationSec: 1 },
     durationSec: DEFAULT_SETTINGS.holdDurationSec,
     analysis: null,
     dirty: true,
+    imageSource,
+    ...(imageSource === 'ai-generated' && prompt ? { aiGeneration: { prompt, generatedAt: new Date().toISOString() } } : {}),
   }
 }
 

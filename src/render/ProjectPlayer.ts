@@ -31,13 +31,15 @@ export class ProjectPlayer {
     if (missing.length) throw new Error(`Chưa phân tích xong Frame: ${missing.map((frame) => frame.name).join(', ')}`)
     if (!timeline.segments.length) return { elapsedMs: 0 }
 
-    const recorder = record ? makeRecorder(this.canvas, this.project.frames[0].settings.fps) : undefined
+    const audio = await ProjectAudioSession.create(this.project, record)
+    const recorder = record ? makeRecorder(this.canvas, this.project.frames[0].settings.fps, audio?.captureStream) : undefined
     const chunks: BlobPart[] = []
     if (record && !recorder) throw new Error('Trình duyệt không hỗ trợ MediaRecorder')
     if (recorder) {
       recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data) }
       recorder.start(100)
     }
+    audio?.start()
 
     const startedAt = performance.now()
     for (const segment of timeline.segments) {
@@ -85,8 +87,14 @@ export class ProjectPlayer {
       ? Math.min(timeline.totalDurationSec, (performance.now() - startedAt) / 1000)
       : timeline.totalDurationSec
     onProgress?.(finalTime)
-    if (!recorder) return { elapsedMs: finalTime * 1000 }
+    if (!recorder) {
+      audio?.stop()
+      return { elapsedMs: finalTime * 1000 }
+    }
+    // Giữ track AudioContext sống cho tới sau khi MediaRecorder phát dataavailable cuối.
+    // Đóng audio sớm có thể khiến Chromium trả một WebM rỗng dù animation đã chạy xong.
     await stopRecorder(recorder)
+    audio?.stop()
     return { elapsedMs: finalTime * 1000, blob: new Blob(chunks, { type: recorder.mimeType || 'video/webm' }) }
   }
 }
@@ -182,15 +190,66 @@ function loadImage(source: string): Promise<HTMLImageElement> {
   })
 }
 
-function makeRecorder(canvas: HTMLCanvasElement, fps: number): MediaRecorder | undefined {
+function makeRecorder(canvas: HTMLCanvasElement, fps: number, audioStream?: MediaStream): MediaRecorder | undefined {
   if (!('MediaRecorder' in window)) return undefined
   const mime = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', ''].find((type) => !type || MediaRecorder.isTypeSupported(type)) ?? ''
-  return new MediaRecorder(canvas.captureStream(fps), mime ? { mimeType: mime } : undefined)
+  const videoStream = canvas.captureStream(fps)
+  const stream = audioStream ? new MediaStream(recordingTracks(videoStream, audioStream)) : videoStream
+  return new MediaRecorder(stream, mime ? { mimeType: mime } : undefined)
+}
+
+export function recordingTracks(videoStream: Pick<MediaStream, 'getVideoTracks'>, audioStream: Pick<MediaStream, 'getAudioTracks'>): MediaStreamTrack[] {
+  return [...videoStream.getVideoTracks(), ...audioStream.getAudioTracks()]
 }
 
 function stopRecorder(recorder: MediaRecorder): Promise<void> {
   return new Promise((resolve) => {
     recorder.onstop = () => resolve()
+    if (recorder.state === 'recording') recorder.requestData()
     recorder.stop()
   })
+}
+
+class ProjectAudioSession {
+  private readonly sources: Array<{ source: AudioBufferSourceNode; startSec: number }> = []
+  readonly captureStream?: MediaStream
+
+  private constructor(private readonly context: AudioContext, destination?: MediaStreamAudioDestinationNode) {
+    this.captureStream = destination?.stream
+  }
+
+  static async create(project: Project, capture: boolean): Promise<ProjectAudioSession | null> {
+    if (!project.audioClips.length) return null
+    const context = new AudioContext()
+    const captureDestination = capture ? context.createMediaStreamDestination() : undefined
+    const session = new ProjectAudioSession(context, captureDestination)
+    const timeline = buildProjectTimeline(project)
+    try {
+      for (const clip of project.audioClips) {
+        const response = await fetch(clip.sourceUrl)
+        const buffer = await context.decodeAudioData(await response.arrayBuffer())
+        const source = context.createBufferSource()
+        source.buffer = buffer
+        source.connect(context.destination)
+        if (captureDestination) source.connect(captureDestination)
+        const startSec = timeline.segments.find((segment) => segment.frameId === clip.frameId)?.startSec ?? clip.startSec
+        session.sources.push({ source, startSec })
+      }
+      return session
+    } catch (error) {
+      await context.close()
+      throw new Error(`Không thể chuẩn bị track giọng đọc: ${error instanceof Error ? error.message : 'lỗi audio'}`)
+    }
+  }
+
+  start(): void {
+    void this.context.resume()
+    const origin = this.context.currentTime + .04
+    for (const item of this.sources) item.source.start(origin + Math.max(0, item.startSec))
+  }
+
+  stop(): void {
+    for (const item of this.sources) { try { item.source.stop() } catch { /* nguồn đã tự kết thúc */ } }
+    void this.context.close()
+  }
 }

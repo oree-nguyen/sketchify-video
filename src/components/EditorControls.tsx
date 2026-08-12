@@ -1,7 +1,7 @@
 import { useEffect, useRef, type CSSProperties, type DragEvent, type MutableRefObject, type ReactNode } from 'react'
 import { HAND_ASSETS } from '../assets/hands/registry'
 import { buildCameraTimeline } from '../camera/cameraTimeline'
-import { frameDrawDurationSec, frameDurationSec, type Frame, type FrameObject, type HandStyleId, type ObjectSettings, type TransitionType } from '../state/projectStore'
+import { frameDrawDurationSec, frameDurationSec, type AudioClip, type Frame, type FrameObject, type HandStyleId, type ObjectSettings, type TransitionType } from '../state/projectStore'
 import type { FrameSettings, PushEdge } from '../state/settingsDefaults'
 import type { Analysis } from '../wasm/wasmClient'
 
@@ -48,9 +48,12 @@ interface EditPanelProps {
   updateTransition: (patch: Partial<Frame['transitionToNext']>) => void
   updateObject: (objectId: string, patch: Partial<ObjectSettings>) => void
   reorderObject: (fromObjectId: string, toObjectId: string, position: 'before' | 'after') => void
+  audioClip?: AudioClip
+  removeAudio: () => void
+  removeFrame: () => void
 }
 
-export function EditPanel({ frame, analysis, last, scope, setScope, selectedObjectId, selectObject, updateFrameSettings, updateTransition, updateObject, reorderObject }: EditPanelProps) {
+export function EditPanel({ frame, analysis, last, scope, setScope, selectedObjectId, selectObject, updateFrameSettings, updateTransition, updateObject, reorderObject, audioClip, removeAudio, removeFrame }: EditPanelProps) {
   const draggedObjectId = useRef<string | null>(null)
   const dropElement = useRef<HTMLElement | null>(null)
   const drawDuration = frameDrawDurationSec(frame)
@@ -119,6 +122,9 @@ export function EditPanel({ frame, analysis, last, scope, setScope, selectedObje
       {scope === 'frame' && <Accordion title="Khung hình" meta={`${formatSec(frameDurationSec(frame))} tổng`} open>
         <div className="derived-duration"><span>Thời gian vẽ</span><b>{formatSec(drawDuration)}</b><small>Tự tính từ tổng thời gian của {frame.objects.length} vật thể.</small></div>
         <RangeField label="Giữ khung" value={frame.settings.holdDurationSec} min={0} max={12} step={.1} unit="s" onChange={(holdDurationSec) => updateFrameSettings({ holdDurationSec })} />
+        {frame.imageSource === 'ai-generated' && <div className="ai-frame-detail"><b>Ảnh do AI tạo</b><p>{frame.aiGeneration?.prompt}</p><small>{frame.aiGeneration?.generatedAt ? new Date(frame.aiGeneration.generatedAt).toLocaleString('vi-VN') : ''}</small></div>}
+        {audioClip && <div className="ai-frame-detail"><b>Giọng đọc · {formatSec(audioClip.durationSec)}</b><p>{audioClip.narrationText}</p><audio controls src={audioClip.sourceUrl} /><button className="quiet" type="button" onClick={removeAudio}>Xoá giọng đọc</button></div>}
+        <button className="danger-button" type="button" onClick={removeFrame}>Xoá khung hình</button>
       </Accordion>}
 
       {scope === 'frame' && <Accordion title="Camera" meta={cameraOptions.find((option) => option.value === frame.settings.camera.mode)?.label}>

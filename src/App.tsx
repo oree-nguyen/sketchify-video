@@ -2,14 +2,18 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSPropert
 import { fitRect } from './camera/cameraTimeline'
 import { EditPanel, HandPanel } from './components/EditorControls'
 import { FramePanel, HorizontalTimeline } from './components/FrameTimeline'
+import { AIGenerationDialog } from './components/AIGenerationDialog'
+import { beginPollinationsAuth, consumeAuthCallbackResult, disconnectPollinations, getPollinationsAccessKey, getPollinationsAppKey, savePollinationsAppKey } from './ai/pollinationsAuth'
+import { generateImage as pollinationsGenerateImage, generateSpeech, generateStoryScript } from './ai/pollinationsClient'
+import type { StoryProgress, StoryScene, StorySceneFailure } from './ai/types'
 import { ProjectPlayer } from './render/ProjectPlayer'
-import { createFrame, objectDropInsertionIndex, reconcileFrameObjects, setFrameCamera, setFrameHold, setFramePageZoom, setFrameTransition, setObjectDuration, setObjectEffect, setObjectOrder, setObjectPinCamera, setObjectPush, syncFrameDuration, type Frame, type ObjectSettings, type Project } from './state/projectStore'
+import { createFrame, createFrameFromSource, objectDropInsertionIndex, reconcileFrameObjects, setFrameCamera, setFrameHold, setFramePageZoom, setFrameTransition, setObjectDuration, setObjectEffect, setObjectOrder, setObjectPinCamera, setObjectPush, syncFrameDuration, type AudioClip, type Frame, type ObjectSettings, type Project } from './state/projectStore'
 import type { FrameSettings } from './state/settingsDefaults'
 import { buildProjectTimeline } from './timeline/projectTimeline'
 import { analyzeImage, type Analysis } from './wasm/wasmClient'
 
 export default function App() {
-  const [project, setProject] = useState<Project>({ frames: [], activeFrameId: null, handStyle: 'pencil', playhead: { globalTimeSec: 0 } })
+  const [project, setProject] = useState<Project>({ frames: [], activeFrameId: null, handStyle: 'pencil', playhead: { globalTimeSec: 0 }, audioClips: [] })
   const [analyses, setAnalyses] = useState<Record<number, Analysis>>({})
   const [analysisStatus, setAnalysisStatus] = useState<'idle' | 'working' | 'error'>('idle')
   const [isPlaying, setIsPlaying] = useState(false)
@@ -20,6 +24,11 @@ export default function App() {
   const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [showRender, setShowRender] = useState(false)
   const [showInkMask, setShowInkMask] = useState(false)
+  const [aiDialogOpen, setAiDialogOpen] = useState(false)
+  const [aiConnected, setAiConnected] = useState(() => Boolean(getPollinationsAccessKey()))
+  const [aiBusy, setAiBusy] = useState(false)
+  const [aiProgress, setAiProgress] = useState<StoryProgress | null>(null)
+  const [aiFailures, setAiFailures] = useState<StorySceneFailure[]>([])
   const fileRef = useRef<HTMLInputElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const playerRef = useRef<{ stop(): void } | null>(null)
@@ -41,13 +50,22 @@ export default function App() {
 
   useEffect(() => () => { if (videoUrl) URL.revokeObjectURL(videoUrl) }, [videoUrl])
   useEffect(() => {
+    const result = consumeAuthCallbackResult()
+    if (result) {
+      setAiConnected(result === 'connected')
+      setAiDialogOpen(true)
+      setAiProgress({ phase: result === 'connected' ? 'done' : 'script', message: result === 'connected' ? 'Đã kết nối Pollinations. Bạn có thể tạo nội dung.' : 'Kết nối bị từ chối hoặc state không hợp lệ.' })
+    }
+  }, [])
+  useEffect(() => {
     const snapshot = {
       activeFrameId: project.activeFrameId,
       handStyle: project.handStyle,
       frames: project.frames.map(({ analysis: _analysis, sourceUrl: _sourceUrl, ...frame }) => frame),
+      audioClips: project.audioClips.map(({ sourceUrl: _sourceUrl, ...clip }) => clip),
     }
     localStorage.setItem('sketchify-video-project', JSON.stringify(snapshot))
-  }, [project.frames, project.activeFrameId, project.handStyle])
+  }, [project.frames, project.activeFrameId, project.handStyle, project.audioClips])
 
   const inspect = async (frameId: number, url: string, settings: FrameSettings): Promise<Analysis | null> => {
     setAnalysisStatus('working')
@@ -152,6 +170,136 @@ export default function App() {
     return setObjectOrder(current, frame.id, fromObjectId, insertionIndex)
   })
 
+  const requireAiKey = (): string => {
+    const key = getPollinationsAccessKey()
+    if (!key) throw new Error('Hãy kết nối Pollinations trước khi tạo nội dung.')
+    return key
+  }
+
+  const addGeneratedImage = async (prompt: string, replaceFrameId?: number): Promise<Frame> => {
+    const blob = await pollinationsGenerateImage(requireAiKey(), prompt.trim())
+    const id = replaceFrameId ?? Date.now()
+    const generated = createFrameFromSource(blob, id, 'ai-generated', prompt.trim())
+    setPanel('edit'); setEditScope('frame'); setSelectedObjectId(null); setShowRender(false)
+    setProject((current) => {
+      if (replaceFrameId === undefined) return { ...current, frames: [...current.frames, generated], activeFrameId: id }
+      const previous = current.frames.find((frame) => frame.id === replaceFrameId)
+      if (previous) URL.revokeObjectURL(previous.sourceUrl)
+      return { ...current, frames: current.frames.map((frame) => frame.id === replaceFrameId ? { ...generated, id: replaceFrameId, transitionToNext: frame.transitionToNext } : frame), activeFrameId: replaceFrameId }
+    })
+    const result = await inspect(id, generated.sourceUrl, generated.settings)
+    if (!result) throw new AnalysisStageError('Ảnh đã tạo nhưng pipeline WASM không phân tích được cảnh này.', id)
+    return generated
+  }
+
+  const generateAiImage = async (prompt: string) => {
+    setAiBusy(true); setAiFailures([]); setAiProgress({ phase: 'image', scene: 1, total: 1, message: 'Đang tạo ảnh bằng Pollinations…' })
+    try {
+      await addGeneratedImage(prompt)
+      setAiProgress({ phase: 'done', message: 'Ảnh đã tạo và đã đưa qua pipeline tách khối.' })
+      setAiDialogOpen(false)
+    } catch (error) {
+      setAiProgress({ phase: 'script', message: error instanceof Error ? error.message : 'Không thể tạo ảnh.' })
+    } finally { setAiBusy(false) }
+  }
+
+  const addNarration = async (frameId: number, scene: StoryScene): Promise<void> => {
+    const blob = await generateSpeech(requireAiKey(), scene.narrationText)
+    const durationSec = await measureAudioDuration(blob)
+    const sourceUrl = URL.createObjectURL(blob)
+    setProject((current) => {
+      const frame = current.frames.find((item) => item.id === frameId)
+      if (!frame) { URL.revokeObjectURL(sourceUrl); return current }
+      const extraHold = Math.max(0, durationSec - frame.durationSec)
+      const frames = current.frames.map((item) => item.id === frameId
+        ? syncFrameDuration({ ...item, settings: { ...item.settings, holdDurationSec: item.settings.holdDurationSec + extraHold } })
+        : item)
+      const timeline = buildProjectTimeline({ ...current, frames })
+      const startSec = timeline.segments.find((segment) => segment.frameId === frameId)?.startSec ?? 0
+      const clip: AudioClip = { id: `ai-audio-${frameId}`, frameId, name: `Lời đọc cảnh ${scene.order}`, sourceUrl, startSec, durationSec, narrationText: scene.narrationText, source: 'ai-generated' }
+      const old = current.audioClips.find((item) => item.frameId === frameId)
+      if (old) URL.revokeObjectURL(old.sourceUrl)
+      return { ...current, frames, audioClips: [...current.audioClips.filter((item) => item.frameId !== frameId), clip] }
+    })
+  }
+
+  const generateStory = async (topic: string, targetSceneCount?: number) => {
+    setAiBusy(true); setAiFailures([]); setAiProgress({ phase: 'script', message: 'Đang viết kịch bản…' })
+    const failures: StorySceneFailure[] = []
+    try {
+      const script = await generateStoryScript(requireAiKey(), { topic: topic.trim(), targetSceneCount, language: 'vi' })
+      for (let index = 0; index < script.scenes.length; index++) {
+        const scene = script.scenes[index]
+        let frame: Frame | undefined
+        try {
+          setAiProgress({ phase: 'image', scene: index + 1, total: script.scenes.length, message: `Đang tạo ảnh cảnh ${index + 1}/${script.scenes.length}…` })
+          frame = await addGeneratedImage(scene.imagePrompt)
+        } catch (error) {
+          failures.push({ scene, stage: error instanceof AnalysisStageError ? 'analysis' : 'image', frameId: error instanceof AnalysisStageError ? error.frameId : frame?.id, message: errorMessage(error) })
+          continue
+        }
+        try {
+          setAiProgress({ phase: 'audio', scene: index + 1, total: script.scenes.length, message: `Đang tạo giọng đọc cảnh ${index + 1}/${script.scenes.length}…` })
+          await addNarration(frame.id, scene)
+        } catch (error) {
+          failures.push({ scene, stage: 'audio', frameId: frame.id, message: errorMessage(error) })
+        }
+      }
+      setAiFailures(failures)
+      setAiProgress({ phase: 'done', message: failures.length ? `Đã giữ các cảnh thành công. ${failures.length} cảnh/bước cần thử lại.` : `Đã tạo đủ ${script.scenes.length} cảnh, ảnh và giọng đọc.` })
+    } catch (error) {
+      setAiProgress({ phase: 'script', message: errorMessage(error) })
+    } finally { setAiBusy(false) }
+  }
+
+  const retryAiFailure = async (failure: StorySceneFailure) => {
+    setAiBusy(true)
+    try {
+      let frameId = failure.frameId
+      if (failure.stage === 'analysis' && frameId !== undefined) {
+        const frame = project.frames.find((item) => item.id === frameId)
+        if (!frame || !(await inspect(frame.id, frame.sourceUrl, frame.settings))) throw new AnalysisStageError('Pipeline WASM vẫn chưa phân tích được cảnh.', frameId)
+      } else if (failure.stage === 'image' || frameId === undefined) {
+        setAiProgress({ phase: 'image', scene: failure.scene.order, total: failure.scene.order, message: `Đang thử lại ảnh cảnh ${failure.scene.order}…` })
+        frameId = (await addGeneratedImage(failure.scene.imagePrompt)).id
+      }
+      setAiProgress({ phase: 'audio', scene: failure.scene.order, total: failure.scene.order, message: `Đang thử lại giọng đọc cảnh ${failure.scene.order}…` })
+      await addNarration(frameId, failure.scene)
+      setAiFailures((current) => current.filter((item) => item !== failure))
+      setAiProgress({ phase: 'done', message: `Cảnh ${failure.scene.order} đã hoàn tất.` })
+    } catch (error) {
+      setAiProgress({ phase: failure.stage, scene: failure.scene.order, total: failure.scene.order, message: errorMessage(error) })
+    } finally { setAiBusy(false) }
+  }
+
+  const regenerateFrame = async (frame: Frame) => {
+    const prompt = frame.aiGeneration?.prompt
+    if (!prompt || !window.confirm('Tạo lại sẽ tiêu thêm Pollen và thay ảnh hiện tại. Tiếp tục?')) return
+    setAiDialogOpen(true); setAiBusy(true); setAiProgress({ phase: 'image', scene: 1, total: 1, message: 'Đang tạo lại ảnh…' })
+    try { await addGeneratedImage(prompt, frame.id); setAiProgress({ phase: 'done', message: 'Đã tạo lại ảnh và phân tích lại khung.' }) }
+    catch (error) { setAiProgress({ phase: 'script', message: errorMessage(error) }) }
+    finally { setAiBusy(false) }
+  }
+
+  const removeActiveAudio = () => setProject((current) => {
+    const clip = current.audioClips.find((item) => item.frameId === current.activeFrameId)
+    if (clip) URL.revokeObjectURL(clip.sourceUrl)
+    return { ...current, audioClips: current.audioClips.filter((item) => item.frameId !== current.activeFrameId) }
+  })
+
+  const removeActiveFrame = () => {
+    if (!active || !window.confirm('Xoá khung hình này cùng giọng đọc đi kèm?')) return
+    URL.revokeObjectURL(active.sourceUrl)
+    project.audioClips.filter((clip) => clip.frameId === active.id).forEach((clip) => URL.revokeObjectURL(clip.sourceUrl))
+    setAnalyses((all) => { const next = { ...all }; delete next[active.id]; return next })
+    setSelectedObjectId(null)
+    setProject((current) => {
+      const index = current.frames.findIndex((frame) => frame.id === active.id)
+      const frames = current.frames.filter((frame) => frame.id !== active.id)
+      return { ...current, frames, activeFrameId: frames[Math.min(Math.max(0, index), frames.length - 1)]?.id ?? null, audioClips: current.audioClips.filter((clip) => clip.frameId !== active.id), playhead: { globalTimeSec: 0 } }
+    })
+  }
+
   const stopPlayback = () => playerRef.current?.stop()
 
   const play = async (record: boolean) => {
@@ -200,6 +348,11 @@ export default function App() {
     <header className="topbar">
       <div className="brand"><span className="brand-mark">S</span><span>Sketchify <b>Video</b></span><small>LOCAL EDITOR</small></div>
       <div className="top-actions">
+        <button className={`ai-connect ${aiConnected ? 'connected' : ''}`} onClick={() => {
+          const appKey = getPollinationsAppKey()
+          if (!aiConnected && appKey) beginPollinationsAuth(appKey)
+          else setAiDialogOpen(true)
+        }}>{aiConnected ? 'AI đã kết nối' : 'Kết nối AI'}</button>
         <button className="quiet" disabled={!active} onClick={() => void play(false)}>{isPlaying ? 'Dừng' : 'Xem thử'}</button>
         <button className="export" disabled={!active || !supported || isPlaying} onClick={() => void play(true)}>Tạo .webm</button>
         {videoUrl && <a className="quiet" href={videoUrl} download="sketchify-video.webm">Tải video</a>}
@@ -208,7 +361,7 @@ export default function App() {
     </header>
 
     <section className={`workspace ${horizontal ? 'is-horizontal' : ''}`}>
-      {!horizontal && <FramePanel frames={project.frames} activeId={active?.id} select={selectFrame} upload={() => fileRef.current?.click()} drop={handleDrop} horizontal={() => setHorizontal(true)} onPointerMove={handleSpotlight} />}
+      {!horizontal && <FramePanel frames={project.frames} activeId={active?.id} select={selectFrame} upload={() => fileRef.current?.click()} create={() => setAiDialogOpen(true)} regenerate={(frame) => void regenerateFrame(frame)} drop={handleDrop} horizontal={() => setHorizontal(true)} onPointerMove={handleSpotlight} />}
       <section className="stage spotlight-surface" onPointerMove={handleSpotlight}>
         <div className="stage-topline"><span>{active ? `KHUNG ${project.frames.findIndex((frame) => frame.id === active.id) + 1}` : 'SẴN SÀNG'}</span><span className="stage-diagnostics">{analysis && !showRender && <button className={`mask-toggle ${showInkMask ? 'active' : ''}`} type="button" aria-pressed={showInkMask} onClick={() => setShowInkMask((value) => !value)}>Ink mask</button>}<span>{analysisStatus === 'working' ? 'Đang phân tích bằng WASM…' : analysis ? `${analysis.blocks.length} vật thể đã tách` : analysisStatus === 'error' ? 'Không thể phân tích ảnh' : 'Thêm ảnh để bắt đầu'}</span></span></div>
         <div className={`preview ${showRender ? 'has-render' : ''}`}>
@@ -228,25 +381,42 @@ export default function App() {
               }} style={{ left: `${block.bbox.x / analysis.img.w * 100}%`, top: `${block.bbox.y / analysis.img.h * 100}%`, width: `${block.bbox.w / analysis.img.w * 100}%`, height: `${block.bbox.h / analysis.img.h * 100}%` }}><b>{object ? object.settings.order + 1 : block.id + 1}</b></button>
             })}</div>}
           </div>}
-          {!active && <div className="empty-preview"><strong>Biến ảnh thành câu chuyện được vẽ</strong><p>Kéo ảnh vào timeline hoặc tải ảnh lên.</p><button className="export" onClick={() => fileRef.current?.click()}>Tải ảnh lên</button></div>}
+          {!active && <div className="empty-preview"><strong>Biến ảnh thành câu chuyện được vẽ</strong><p>Tải ảnh của bạn hoặc để AI tạo trọn storyboard tiếng Việt.</p><div className="empty-actions"><button className="export" onClick={() => fileRef.current?.click()}>Tải ảnh lên</button><button className="quiet" onClick={() => setAiDialogOpen(true)}>Tạo video từ chủ đề…</button></div></div>}
         </div>
         <div className="transport"><button disabled={isPlaying} onClick={() => setProgress(Math.max(0, progress - 10))}>−10</button><button className="play" disabled={!active} onClick={() => void play(false)}>{isPlaying ? 'Ⅱ' : '▶'}</button><button disabled={isPlaying} onClick={() => setProgress(Math.min(total, progress + 10))}>+10</button><span className="duration">{formatTime(progress)} / {formatTime(total)}</span></div>
         <input aria-label="Playhead" className="scrubber range-input" type="range" min="0" max={Math.max(total, 1)} step=".1" value={Math.min(progress, total)} style={{ '--range-progress': `${rangeProgress}%` } as CSSProperties} onChange={(event) => setProgress(Number(event.target.value))} />
-        {horizontal && <HorizontalTimeline frames={project.frames} activeId={active?.id} select={selectFrame} upload={() => fileRef.current?.click()} drop={handleDrop} vertical={() => setHorizontal(false)} />}
+        {horizontal && <HorizontalTimeline frames={project.frames} activeId={active?.id} select={selectFrame} upload={() => fileRef.current?.click()} create={() => setAiDialogOpen(true)} regenerate={(frame) => void regenerateFrame(frame)} drop={handleDrop} vertical={() => setHorizontal(false)} />}
       </section>
       <aside className="inspector spotlight-surface" onPointerMove={handleSpotlight}>
         <nav className="tool-rail"><button className={panel === 'hand' ? 'active' : ''} onClick={() => setPanel('hand')} aria-label="Bàn tay" title="Bàn tay">✎</button>{active && <button className={panel === 'edit' ? 'active' : ''} onClick={() => setPanel('edit')} aria-label="Chỉnh sửa" title="Chỉnh sửa">☷</button>}</nav>
         <div className="inspector-body">{panel === 'hand' || !active
           ? <HandPanel style={project.handStyle} setStyle={(handStyle) => setProject((current) => ({ ...current, handStyle }))} />
-          : <EditPanel frame={active} analysis={analysis} last={project.frames.at(-1)?.id === active.id} scope={editScope} setScope={setEditScope} selectedObjectId={selectedObjectId} selectObject={setSelectedObjectId} updateFrameSettings={updateFrameSettings} updateTransition={updateTransition} updateObject={updateObject} reorderObject={reorderObject} />}
+          : <EditPanel frame={active} analysis={analysis} last={project.frames.at(-1)?.id === active.id} scope={editScope} setScope={setEditScope} selectedObjectId={selectedObjectId} selectObject={setSelectedObjectId} updateFrameSettings={updateFrameSettings} updateTransition={updateTransition} updateObject={updateObject} reorderObject={reorderObject} audioClip={project.audioClips.find((clip) => clip.frameId === active.id)} removeAudio={removeActiveAudio} removeFrame={removeActiveFrame} />}
         </div>
       </aside>
     </section>
     <input ref={fileRef} hidden type="file" accept="image/png,image/jpeg" onChange={handleFile} />
+    <AIGenerationDialog open={aiDialogOpen} connected={aiConnected} busy={aiBusy} progress={aiProgress} failures={aiFailures}
+      close={() => { if (!aiBusy) setAiDialogOpen(false) }} upload={() => fileRef.current?.click()}
+      connect={(appKey) => { savePollinationsAppKey(appKey); beginPollinationsAuth(appKey) }}
+      disconnect={() => { disconnectPollinations(); setAiConnected(false); setAiProgress({ phase: 'script', message: 'Đã ngắt kết nối Pollinations.' }) }}
+      generateImage={generateAiImage} generateStory={generateStory} retryFailure={retryAiFailure} />
   </main>
 }
 
 function formatTime(seconds: number) { return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(Math.floor(seconds % 60)).padStart(2, '0')}` }
+
+function errorMessage(error: unknown): string { return error instanceof Error ? error.message : 'Có lỗi không xác định.' }
+
+class AnalysisStageError extends Error {
+  constructor(message: string, readonly frameId: number) { super(message) }
+}
+
+async function measureAudioDuration(blob: Blob): Promise<number> {
+  const context = new AudioContext()
+  try { return (await context.decodeAudioData(await blob.arrayBuffer())).duration }
+  finally { await context.close() }
+}
 
 function InkMaskOverlay({ analysis }: { analysis: Analysis }) {
   const ref = useRef<HTMLCanvasElement>(null)

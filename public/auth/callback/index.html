@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="vi">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Đang kết nối Pollinations…</title></head>
+<body style="margin:0;background:#090c11;color:#e7edf5;font:16px Arial;display:grid;place-items:center;min-height:100vh">
+  <p id="status">Đang xác nhận kết nối Pollinations…</p>
+  <script>
+    (() => {
+      const params = new URLSearchParams(location.hash.slice(1));
+      const key = params.get('api_key');
+      const state = params.get('state');
+      const expected = sessionStorage.getItem('wb.pollinations.auth-state');
+      const ok = Boolean(key && key.startsWith('sk_') && state && expected && state === expected);
+      if (ok) localStorage.setItem('wb.pollinations.key', key);
+      sessionStorage.removeItem('wb.pollinations.auth-state');
+      sessionStorage.setItem('wb.pollinations.callback-result', ok ? 'connected' : 'denied');
+      document.getElementById('status').textContent = ok ? 'Đã kết nối. Đang trở về Sketchify Video…' : 'Không thể xác nhận kết nối. Đang trở về ứng dụng…';
+      location.replace(new URL('../../', location.href));
+    })();
+  </script>
+</body>
+</html>
