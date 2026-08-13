@@ -1,7 +1,7 @@
 import { useEffect, useRef, type CSSProperties, type DragEvent, type MutableRefObject, type ReactNode } from 'react'
 import { HAND_ASSETS } from '../assets/hands/registry'
 import { buildCameraTimeline } from '../camera/cameraTimeline'
-import { frameDrawDurationSec, frameDurationSec, type AudioClip, type Frame, type FrameObject, type HandStyleId, type ObjectSettings, type TransitionType } from '../state/projectStore'
+import { frameDrawDurationSec, frameDurationSec, type AudioClip, type Frame, type FrameObject, type HandStyleId, type ObjectSettings, type PushHandStyle, type TransitionType } from '../state/projectStore'
 import type { FrameSettings, PushEdge } from '../state/settingsDefaults'
 import type { Analysis } from '../wasm/wasmClient'
 
@@ -24,6 +24,10 @@ const edgeOptions: Array<{ value: PushEdge; label: string }> = [
   { value: 'auto', label: 'Cạnh gần nhất' }, { value: 'left', label: 'Từ trái' },
   { value: 'right', label: 'Từ phải' }, { value: 'top', label: 'Từ trên' }, { value: 'bottom', label: 'Từ dưới' },
 ]
+const pushHandOptions: Array<{ value: PushHandStyle; label: string }> = [
+  { value: 'auto', label: 'Tự động theo hướng' },
+  ...(['1', '2', '3', '4', '5', '6'] as PushHandStyle[]).map((value) => ({ value, label: `Tay đẩy số ${value}` })),
+]
 
 export function HandPanel({ style, setStyle }: { style: HandStyleId; setStyle: (id: HandStyleId) => void }) {
   return <>
@@ -45,7 +49,7 @@ interface EditPanelProps {
   selectedObjectId: string | null
   selectedObjectIds: string[]
   selectObject: (objectId: string | null) => void
-  toggleObjectSelection: (objectId: string) => void
+  toggleObjectSelection: (objectId: string, additive: boolean) => void
   groupSelectedObjects: () => void
   updateFrameSettings: (patch: Partial<FrameSettings>) => void
   updateTransition: (patch: Partial<Frame['transitionToNext']>) => void
@@ -60,8 +64,8 @@ export function EditPanel({ frame, analysis, last, scope, setScope, selectedObje
   const draggedObjectId = useRef<string | null>(null)
   const dropElement = useRef<HTMLElement | null>(null)
   const drawDuration = frameDrawDurationSec(frame)
-  const pinned = frame.objects.filter((object) => object.settings.pinCamera).map((object) => object.blockId)
-  const cameraTimeline = analysis ? buildCameraTimeline(frame.settings, analysis.blocks, analysis.units, analysis.img.w, analysis.img.h, pinned, drawDuration) : null
+  const zoomBlocks = frame.objects.filter((object) => object.settings.zoomFollow).map((object) => object.blockId)
+  const cameraTimeline = analysis ? buildCameraTimeline(frame.settings, analysis.blocks, analysis.units, analysis.img.w, analysis.img.h, zoomBlocks, drawDuration) : null
   const selected = frame.objects.find((object) => object.objectId === selectedObjectId) ?? frame.objects[0]
 
   return <>
@@ -86,16 +90,15 @@ export function EditPanel({ frame, analysis, last, scope, setScope, selectedObje
             onDragOver={(event) => markObjectDrop(event, object.objectId, draggedObjectId, dropElement)}
             onDragLeave={(event) => clearObjectDropOnLeave(event, dropElement)}
             onDrop={(event) => dropObject(event, object.objectId, draggedObjectId, dropElement, reorderObject)}
-            onClick={() => selectObject(object.objectId)}
+            onClick={(event) => toggleObjectSelection(object.objectId, event.shiftKey)}
           >
-            <label className="object-select" title="Chọn để gom nhóm" onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={selectedObjectIds.includes(object.objectId)} onChange={() => toggleObjectSelection(object.objectId)} /><span aria-hidden="true" /></label>
             <span className="object-grip" aria-hidden="true">⠿</span>
             <ObjectThumbnail analysis={analysis} object={object} />
             <span className="object-summary"><b>#{object.settings.order + 1} <em>{object.settings.kindOverride ?? object.kind}</em></b><small>{object.inkArea} ink · {object.bbox.w}×{object.bbox.h}px</small>{selected?.objectId === object.objectId && <small className="timeline-clean">Timeline đã cập nhật</small>}</span>
             <label className="object-duration" onClick={(event) => event.stopPropagation()}><span>Vẽ</span><input type="number" min="0.1" max="120" step="0.1" value={object.settings.drawDurationSec} onChange={(event) => updateObject(object.objectId, { drawDurationSec: Math.max(.1, Number(event.target.value)) })} /><i>s</i></label>
             <span className="object-flags" aria-label="Hiệu ứng vật thể">
               <button type="button" title="Đẩy vào khung" aria-pressed={object.settings.pushEntry.enabled} onClick={(event) => { event.stopPropagation(); updateObject(object.objectId, { pushEntry: { ...object.settings.pushEntry, enabled: !object.settings.pushEntry.enabled } }) }}>↗</button>
-              <button type="button" title="Ghim camera" aria-pressed={object.settings.pinCamera} onClick={(event) => { event.stopPropagation(); updateObject(object.objectId, { pinCamera: !object.settings.pinCamera }) }}>⌖</button>
+              <button type="button" title="Zoom theo vật thể" aria-pressed={object.settings.zoomFollow} onClick={(event) => { event.stopPropagation(); if (frame.settings.cameraPinned && !object.settings.zoomFollow) window.alert('Ghim camera đang bật (camera nhìn toàn khung, không di chuyển). Vui lòng tắt Ghim camera để dùng Zoom theo vật thể.'); else updateObject(object.objectId, { zoomFollow: !object.settings.zoomFollow }) }}>⌖</button>
             </span>
           </article>)}
         </div>
@@ -106,22 +109,11 @@ export function EditPanel({ frame, analysis, last, scope, setScope, selectedObje
             { value: 'vector' as const, label: 'Vector · nét vẽ' },
             { value: 'photo' as const, label: 'Ảnh · vùng màu' },
           ]} onChange={(kindOverride) => updateObject(selected.objectId, { kindOverride })} />
-          <SelectMenu label="Màu nét" value={selected.settings.strokeColorMode} options={[
-            { value: 'object' as const, label: 'Màu gốc vật thể' },
-            { value: 'custom' as const, label: 'Màu tuỳ chỉnh' },
-          ]} onChange={(strokeColorMode) => updateObject(selected.objectId, { strokeColorMode })} />
-          {selected.settings.strokeColorMode === 'custom' && <label className="color-field"><span>Màu mực</span><input type="color" value={selected.settings.inkColor} onChange={(event) => updateObject(selected.objectId, { inkColor: event.target.value })} /></label>}
-          <RangeField label="Độ dày nét" value={selected.settings.strokeWidth} min={1} max={12} step={.5} unit="px" onChange={(strokeWidth) => updateObject(selected.objectId, { strokeWidth })} />
           <ToggleRow label="Đẩy vật thể vào khung" checked={selected.settings.pushEntry.enabled} onChange={(enabled) => updateObject(selected.objectId, { pushEntry: { ...selected.settings.pushEntry, enabled } })} />
           {selected.settings.pushEntry.enabled && <SelectMenu label="Hướng đi vào" value={selected.settings.pushEntry.edge} options={edgeOptions} onChange={(edge) => updateObject(selected.objectId, { pushEntry: { ...selected.settings.pushEntry, edge } })} />}
-          <ToggleRow label="Ghim camera cận cảnh" checked={selected.settings.pinCamera} onChange={(pinCamera) => updateObject(selected.objectId, { pinCamera })} />
+          {selected.settings.pushEntry.enabled && <SelectMenu label="Tay đẩy" value={selected.settings.pushEntry.handStyle} options={pushHandOptions} onChange={(handStyle) => updateObject(selected.objectId, { pushEntry: { ...selected.settings.pushEntry, handStyle } })} />}
+          <ToggleRow label="Zoom theo vật thể" checked={selected.settings.zoomFollow} disabled={frame.settings.cameraPinned} onBlocked={() => window.alert('Ghim camera đang bật (camera nhìn toàn khung, không di chuyển). Vui lòng tắt Ghim camera để dùng Zoom theo vật thể.')} onChange={(zoomFollow) => updateObject(selected.objectId, { zoomFollow })} />
         </div>}
-      </Accordion>}
-
-      {scope === 'object' && !last && <Accordion title="Khung · Chuyển cảnh" meta={transitionOptions.find((option) => option.value === frame.transitionToNext.type)?.label}>
-        <div className="transition-list">{transitionOptions.map((option) => <button className={`transition-option ${frame.transitionToNext.type === option.value ? 'chosen' : ''}`} key={option.value} onClick={() => updateTransition({ type: option.value })}>
-          <span><b>{option.label}</b><small>{option.hint}</small></span>
-        </button>)}</div>
       </Accordion>}
 
       {scope === 'frame' && <Accordion title="Khung hình" meta={`${formatSec(frameDurationSec(frame))} tổng`} open>
@@ -133,6 +125,7 @@ export function EditPanel({ frame, analysis, last, scope, setScope, selectedObje
       </Accordion>}
 
       {scope === 'frame' && <Accordion title="Camera" meta={cameraOptions.find((option) => option.value === frame.settings.camera.mode)?.label}>
+        <ToggleRow label="Ghim camera" checked={frame.settings.cameraPinned} onChange={(cameraPinned) => { if (cameraPinned && frame.objects.some((object) => object.settings.zoomFollow)) window.alert('Đang có vật thể bật Zoom theo vật thể. Vui lòng tắt Zoom theo vật thể trước khi bật Ghim camera.'); else updateFrameSettings({ cameraPinned }) }} />
         <SelectMenu label="Chế độ camera" value={frame.settings.camera.mode} options={cameraOptions} onChange={(mode) => updateFrameSettings({ camera: { ...frame.settings.camera, mode } })} />
         {cameraTimeline?.fellBack && <div className="camera-warning">{cameraTimeline.reason}</div>}
       </Accordion>}
@@ -247,6 +240,6 @@ function RangeField({ label, value, min, max, step = 1, unit, onChange }: { labe
   return <label className="range-field"><span>{label}<output>{Math.round(value * 10) / 10}{unit}</output></span><input className="range-input" type="range" min={min} max={max} step={step} value={value} style={{ '--range-progress': `${progress}%` } as CSSProperties} onChange={(event) => onChange(Number(event.target.value))} /></label>
 }
 
-function ToggleRow({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
-  return <label className="toggle-row"><span>{label}</span><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /><i aria-hidden="true" /></label>
+function ToggleRow({ label, checked, disabled = false, onBlocked, onChange }: { label: string; checked: boolean; disabled?: boolean; onBlocked?: () => void; onChange: (checked: boolean) => void }) {
+  return <label className={`toggle-row ${disabled ? 'disabled' : ''}`} onClick={(event) => { if (disabled) { event.preventDefault(); onBlocked?.() } }}><span>{label}</span><input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} /><i aria-hidden="true" /></label>
 }

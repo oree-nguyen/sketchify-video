@@ -9,7 +9,7 @@ function frame(id: number, transition: TransitionType = 'none', transitionDurati
   const objects: FrameObject[] = Array.from({ length: 4 }, (_, index) => ({
     objectId: `${id}:${index}`, blockId: index, bbox: { x: index * 10, y: 0, w: 8, h: 8 },
     centroid: { x: index * 10 + 4, y: 4 }, kind: 'vector', inkArea: 20,
-    settings: { objectId: `${id}:${index}`, blockId: index, order: index, drawDurationSec: 2, strokeColorMode: 'object', inkColor: '#111827', strokeWidth: 3, pushEntry: { enabled: false, edge: 'auto' }, pinCamera: false },
+    settings: { objectId: `${id}:${index}`, blockId: index, order: index, drawDurationSec: 2, strokeColorMode: 'object', inkColor: '#111827', strokeWidth: 3, pushEntry: { enabled: false, edge: 'auto', handStyle: 'auto' }, zoomFollow: true },
   }))
   return {
     id,

@@ -2,12 +2,14 @@ import type { AnalysisResult, DrawUnit } from '../wasm/wasmClient'
 import type { FrameSettings } from '../state/settingsDefaults'
 import type { ObjectSettings } from '../state/projectStore'
 import { buildCameraTimeline, cameraAt, cameraFocusBlockAt } from '../camera/cameraTimeline'
+import { resolvePushHand } from '../assets/hands/pushRegistry'
 
 export interface PlayerOptions {
   sourceUrl: string; drawDurationSec: number; holdDurationSec: number; fps: number
-  analysis: AnalysisResult; hand: { src: string; anchorPct: { x: number; y: number } };settings?:FrameSettings;pinnedBlockIds?:number[];objectSettingsByBlockId?:Readonly<Record<number,ObjectSettings>>;onCanvasReady?:()=>void
+  analysis: AnalysisResult; hand: { src: string; anchorPct: { x: number; y: number } };settings?:FrameSettings;zoomBlockIds?:number[];objectSettingsByBlockId?:Readonly<Record<number,ObjectSettings>>;onCanvasReady?:()=>void
 }
 export interface PlayResult { elapsedMs: number; blob?: Blob }
+export const usesStandardReveal = (settings: ObjectSettings | undefined) => !settings?.pushEntry.enabled
 
 export class Player {
   private stopped = false
@@ -16,8 +18,10 @@ export class Player {
 
   async play(record: boolean, onProgress?: (elapsedSec:number)=>void): Promise<PlayResult> {
     const handImage=await loadImage(this.options.hand.src)
+    const pushHandImages=new Map<string,HTMLImageElement>()
+    for(const settings of Object.values(this.options.objectSettingsByBlockId??{})){if(!settings.pushEntry.enabled)continue;const edge=settings.pushEntry.edge==='auto'?'left':settings.pushEntry.edge,asset=resolvePushHand(settings.pushEntry.handStyle,edge);if(asset.src&&!pushHandImages.has(asset.id))pushHandImages.set(asset.id,await loadImage(asset.src))}
     const {img,units}=this.options.analysis,w=img.w,h=img.h
-    const camera=this.options.settings?buildCameraTimeline(this.options.settings,this.options.analysis.blocks,units,w,h,this.options.pinnedBlockIds,this.options.drawDurationSec):null
+    const camera=this.options.settings?buildCameraTimeline(this.options.settings,this.options.analysis.blocks,units,w,h,this.options.zoomBlockIds,this.options.drawDurationSec):null
     const blockTiles=new Map<number,HTMLCanvasElement>()
     this.displayCanvas.width=w;this.displayCanvas.height=h
     const display=this.displayCanvas.getContext('2d',{willReadFrequently:true})!;const content=document.createElement('canvas');content.width=w;content.height=h;const ctx=content.getContext('2d',{willReadFrequently:true})!
@@ -45,14 +49,23 @@ export class Player {
         // trên contentCanvas và không bao giờ được tính/vẽ lại ở frame sau.
         while(unitCursor<units.length){
           const i=unitCursor,u=units[i];if(u.t0>progress)break
+          const objectSettings=this.options.objectSettingsByBlockId?.[u.blockId]
+          if(!usesStandardReveal(objectSettings)){
+            const own=units.filter(unit=>unit.blockId===u.blockId),end=Math.max(...own.map(unit=>unit.t1))
+            if(progress<end)break
+            const block=this.options.analysis.blocks.find(candidate=>candidate.id===u.blockId)
+            if(block){const tile=blockTiles.get(u.blockId)??getBlockTile(block,img.rgba,img.bg,w);blockTiles.set(u.blockId,tile);ctx.save();ctx.globalAlpha=1;ctx.drawImage(tile,block.bbox.x,block.bbox.y);ctx.restore()}
+            while(unitCursor<units.length&&units[unitCursor].blockId===u.blockId){unitAlpha[unitCursor]=1;unitCursor++}
+            continue
+          }
           const current=unitProgress(u,progress),prior=unitProgress(u,previousProgress)
           // Bất kể frame có nhảy qua t1 hay không, unit hoàn tất luôn được chốt bằng
           // pixel gốc alpha=1 ngay tại frame này, rồi mới cho cursor đi tiếp.
           if(current>=1){blitFullUnit(ctx,getUnitTile(u,img.rgba,img.bg,w),u,i===debugUnitIndex?{unitIndex:i,type:u.type,t1:u.t1,progress}:undefined);unitAlpha[i]=1;unitCursor++;continue}
-          if(current>prior){const objectSettings=this.options.objectSettingsByBlockId?.[u.blockId],renderAsPath=objectSettings?.kindOverride==='photo'?false:(objectSettings?.kindOverride==='vector'?u.path.length>=4:u.type==='path');if(renderAsPath)drawPathDelta(ctx,u,prior,current,getUnitTile(u,img.rgba,img.bg,w),objectSettings);else{const old=unitAlpha[i];const alpha=old<1?(current-old)/(1-old):0;if(alpha>0){ctx.save();ctx.globalAlpha=alpha;ctx.filter='none';if(i===debugUnitIndex&&debugPartialLogs<4){console.log('[Sketchify] tile alpha trace',{phase:'partial-before-drawImage',unitIndex:i,progress,t0:u.t0,t1:u.t1,accumulatedBefore:old,requestedAlpha:alpha,ctxGlobalAlpha:ctx.globalAlpha});debugPartialLogs++}ctx.drawImage(getUnitTile(u,img.rgba,img.bg,w),u.bbox.x,u.bbox.y);ctx.restore();unitAlpha[i]=current}}}
+          if(current>prior){const renderAsPath=objectSettings?.kindOverride==='photo'?false:(objectSettings?.kindOverride==='vector'?u.path.length>=4:u.type==='path');if(renderAsPath)drawPathDelta(ctx,u,prior,current,getUnitTile(u,img.rgba,img.bg,w),objectSettings);else{const old=unitAlpha[i];const alpha=old<1?(current-old)/(1-old):0;if(alpha>0){ctx.save();ctx.globalAlpha=alpha;ctx.filter='none';if(i===debugUnitIndex&&debugPartialLogs<4){console.log('[Sketchify] tile alpha trace',{phase:'partial-before-drawImage',unitIndex:i,progress,t0:u.t0,t1:u.t1,accumulatedBefore:old,requestedAlpha:alpha,ctxGlobalAlpha:ctx.globalAlpha});debugPartialLogs++}ctx.drawImage(getUnitTile(u,img.rgba,img.bg,w),u.bbox.x,u.bbox.y);ctx.restore();unitAlpha[i]=current}}}
           break
         }
-        const active=elapsed<drawMs?units.find(u=>progress>=u.t0&&progress<u.t1):undefined
+        const active=elapsed<drawMs?units.find(u=>progress>=u.t0&&progress<u.t1&&usesStandardReveal(this.options.objectSettingsByBlockId?.[u.blockId])):undefined
         const crop=cameraAt(camera?.keys??[{t:0,crop:{x:0,y:0,w,h},easing:'linear'}],progress)
         const sampleBucket=Math.min(9,Math.floor(progress*10))
         if(active&&sampleBucket!==cameraSampleBucket){
@@ -60,7 +73,7 @@ export class Player {
           console.log('[Sketchify] camera alignment',{progress,drawBlockId:active.blockId,cameraBlockId:camera?cameraFocusBlockAt(camera.keys,progress):undefined,inTransition:false})
         }
         display.clearRect(0,0,w,h);display.drawImage(content,crop.x,crop.y,crop.w,crop.h,0,0,w,h)
-        drawPushEntry(display,this.options.analysis,units,img.rgba,img.bg,w,h,progress,crop,this.options.objectSettingsByBlockId,blockTiles)
+        drawPushEntry(display,this.options.analysis,units,img.rgba,img.bg,w,h,progress,crop,this.options.objectSettingsByBlockId,blockTiles,pushHandImages)
         if(!finalVerificationLogged&&progress>=1&&unitCursor===units.length){
           console.log('[Sketchify] final render verification',verifyFinalContent(ctx,units,img.rgba,img.bg,w,h))
           finalVerificationLogged=true
@@ -111,9 +124,10 @@ function verifyFinalContent(ctx:CanvasRenderingContext2D,units:DrawUnit[],rgba:U
 }
 function drawHand(ctx:CanvasRenderingContext2D,img:HTMLImageElement,anchor:{x:number;y:number},x:number,y:number,angle:number,w:number){const scale=(w*.14)/img.naturalWidth;ctx.save();ctx.translate(x,y);ctx.rotate(angle);ctx.scale(scale,scale);ctx.drawImage(img,-anchor.x/100*img.naturalWidth,-anchor.y/100*img.naturalHeight);ctx.restore()}
 function makeRecorder(canvas:HTMLCanvasElement,fps:number){if(!('MediaRecorder'in window))return undefined;const mime=['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm',''].find(t=>!t||MediaRecorder.isTypeSupported(t))??'';return new MediaRecorder(canvas.captureStream(fps),mime?{mimeType:mime}:undefined)}
-function drawPushEntry(display:CanvasRenderingContext2D,analysis:AnalysisResult,units:DrawUnit[],rgba:Uint8Array,bg:[number,number,number],w:number,h:number,progress:number,crop:{x:number;y:number;w:number;h:number},settingsByBlock:Readonly<Record<number,ObjectSettings>>|undefined,cache:Map<number,HTMLCanvasElement>){
+export function drawPushEntry(display:CanvasRenderingContext2D,analysis:AnalysisResult,units:DrawUnit[],rgba:Uint8Array,bg:[number,number,number],w:number,h:number,progress:number,crop:{x:number;y:number;w:number;h:number},settingsByBlock:Readonly<Record<number,ObjectSettings>>|undefined,cache:Map<number,HTMLCanvasElement>,handImages:ReadonlyMap<string,HTMLImageElement>=new Map()){
   if(!settingsByBlock)return
-  for(const [key,settings] of Object.entries(settingsByBlock)){if(!settings.pushEntry.enabled)continue;const id=Number(key),block=analysis.blocks.find(b=>b.id===id);if(!block)continue;const own=units.filter(u=>u.blockId===id),start=own[0]?.t0,end=own.at(-1)?.t1;if(start===undefined||end===undefined)continue;const entryEnd=start+(end-start)*.25;if(progress<start||progress>=entryEnd)continue;const q=(progress-start)/Math.max(.0001,entryEnd-start),ease=1-Math.pow(1-q,3),edge=settings.pushEntry.edge,tile=cache.get(id)??getBlockTile(block,rgba,bg,w);cache.set(id,tile);let dx=0,dy=0;const chosen=edge==='auto'?nearestEdge(block.bbox,w,h):edge;if(chosen==='left')dx=-block.bbox.w*(1-ease)-block.bbox.x;if(chosen==='right')dx=(w-block.bbox.x)*(1-ease);if(chosen==='top')dy=-block.bbox.h*(1-ease)-block.bbox.y;if(chosen==='bottom')dy=(h-block.bbox.y)*(1-ease);display.save();display.globalAlpha=.65*ease;display.drawImage(tile,(block.bbox.x+dx-crop.x)*w/crop.w,(block.bbox.y+dy-crop.y)*h/crop.h,block.bbox.w*w/crop.w,block.bbox.h*h/crop.h);display.restore()}
+  for(const [key,settings] of Object.entries(settingsByBlock)){if(!settings.pushEntry.enabled)continue;const id=Number(key),block=analysis.blocks.find(b=>b.id===id);if(!block)continue;const own=units.filter(u=>u.blockId===id),start=own[0]?.t0,end=own.at(-1)?.t1;if(start===undefined||end===undefined||progress<start||progress>=end)continue;const q=(progress-start)/Math.max(.0001,end-start),ease=1-Math.pow(1-q,3),edge=settings.pushEntry.edge,tile=cache.get(id)??getBlockTile(block,rgba,bg,w);cache.set(id,tile);let dx=0,dy=0;const chosen=edge==='auto'?nearestEdge(block.bbox,w,h):edge;if(chosen==='left')dx=-block.bbox.w*(1-ease)-block.bbox.x;if(chosen==='right')dx=(w-block.bbox.x)*(1-ease);if(chosen==='top')dy=-block.bbox.h*(1-ease)-block.bbox.y;if(chosen==='bottom')dy=(h-block.bbox.y)*(1-ease);const x=(block.bbox.x+dx-crop.x)*w/crop.w,y=(block.bbox.y+dy-crop.y)*h/crop.h,bw=block.bbox.w*w/crop.w,bh=block.bbox.h*h/crop.h;display.save();display.globalAlpha=ease;display.drawImage(tile,x,y,bw,bh);const asset=resolvePushHand(settings.pushEntry.handStyle,chosen),image=handImages.get(asset.id);if(image)drawHand(display,image,asset.anchorPct,x+bw/2,y+bh/2,0,w);else drawPushHandPlaceholder(display,asset.id,x+bw/2,y+bh/2,w);display.restore()}
 }
+function drawPushHandPlaceholder(ctx:CanvasRenderingContext2D,style:ObjectSettings['pushEntry']['handStyle'],x:number,y:number,w:number){const label=style==='auto'?'A':style,r=Math.max(12,w*.018);ctx.save();ctx.globalAlpha=1;ctx.fillStyle='#84cc16';ctx.shadowColor='#84cc16';ctx.shadowBlur=10;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;ctx.fillStyle='#132006';ctx.font=`700 ${Math.round(r)}px Oswald Sketchify, sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(label,x,y);ctx.restore()}
 function nearestEdge(b:{x:number;y:number;w:number;h:number},w:number,h:number){const d={left:b.x,right:w-(b.x+b.w),top:b.y,bottom:h-(b.y+b.h)};return (Object.entries(d).sort((a,b)=>a[1]-b[1])[0][0] as 'left'|'right'|'top'|'bottom')}
 function getBlockTile(block:AnalysisResult['blocks'][number],rgba:Uint8Array,bg:[number,number,number],width:number){const tile=document.createElement('canvas');tile.width=block.bbox.w;tile.height=block.bbox.h;const ctx=tile.getContext('2d',{willReadFrequently:true})!,data=ctx.createImageData(tile.width,tile.height);for(const p of block.pixels){const x=p%width-block.bbox.x,y=Math.floor(p/width)-block.bbox.y;if(x<0||y<0||x>=tile.width||y>=tile.height)continue;const source=p*4,target=(y*tile.width+x)*4,a=rgba[source+3]/255;data.data[target]=Math.round(rgba[source]*a+bg[0]*(1-a));data.data[target+1]=Math.round(rgba[source+1]*a+bg[1]*(1-a));data.data[target+2]=Math.round(rgba[source+2]*a+bg[2]*(1-a));data.data[target+3]=255}ctx.putImageData(data,0,0);return tile}

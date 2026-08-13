@@ -67,7 +67,7 @@ export class ProjectPlayer {
         analysis: retimeAnalysisForFrame(this.analyses[frame.id], frame),
         hand: HAND_ASSETS[this.project.handStyle],
         settings: { ...frame.settings, holdDurationSec: holdDuration },
-        pinnedBlockIds: frame.objects.filter((object) => object.settings.pinCamera).map((object) => object.blockId),
+        zoomBlockIds: frame.objects.filter((object) => object.settings.zoomFollow).map((object) => object.blockId),
         objectSettingsByBlockId: Object.fromEntries(frame.objects.map((object) => [object.blockId, object.settings])),
         onCanvasReady: this.onCanvasReady,
       })

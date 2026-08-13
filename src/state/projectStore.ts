@@ -14,9 +14,11 @@ export interface ObjectSettings {
   strokeColorMode: 'object' | 'custom'
   inkColor: string
   strokeWidth: number
-  pushEntry: { enabled: boolean; edge: PushEdge }
-  pinCamera: boolean
+  pushEntry: { enabled: boolean; edge: PushEdge; handStyle: PushHandStyle }
+  zoomFollow: boolean
 }
+
+export type PushHandStyle = 'auto' | '1' | '2' | '3' | '4' | '5' | '6'
 
 export interface FrameObject {
   objectId: string
@@ -120,6 +122,8 @@ export function reconcileFrameObjects(frameId: number, blocks: Block[], previous
       ...geometric.settings,
       objectId,
       blockId: block.id,
+      pushEntry: { enabled: geometric.settings.pushEntry.enabled, edge: geometric.settings.pushEntry.edge, handStyle: geometric.settings.pushEntry.handStyle ?? 'auto' },
+      zoomFollow: geometric.settings.zoomFollow ?? (geometric.settings as ObjectSettings & { pinCamera?: boolean }).pinCamera ?? true,
     } : {
       objectId,
       blockId: block.id,
@@ -128,8 +132,8 @@ export function reconcileFrameObjects(frameId: number, blocks: Block[], previous
       strokeColorMode: 'object',
       inkColor: '#111827',
       strokeWidth: 3,
-      pushEntry: { enabled: false, edge: 'auto' },
-      pinCamera: false,
+      pushEntry: { enabled: false, edge: 'auto', handStyle: 'auto' },
+      zoomFollow: true,
     }
     return { objectId, blockId: block.id, bbox: block.bbox, centroid: block.centroid, kind: block.kind, inkArea: block.inkArea, settings }
   })
@@ -211,8 +215,16 @@ export function setObjectPush(project: Project, frameId: number, objectId: strin
   })
 }
 
-export function setObjectPinCamera(project: Project, frameId: number, objectId: string, pinned: boolean): Project {
-  return updateProjectFrame(project, frameId, (frame) => updateObjectSettings(frame, objectId, { pinCamera: pinned }))
+export function setObjectZoomFollow(project: Project, frameId: number, objectId: string, enabled: boolean): Project {
+  const frame = project.frames.find((candidate) => candidate.id === frameId)
+  if (enabled && frame?.settings.cameraPinned) return project
+  return updateProjectFrame(project, frameId, (frame) => updateObjectSettings(frame, objectId, { zoomFollow: enabled }))
+}
+
+export function setFrameCameraPinned(project: Project, frameId: number, enabled: boolean): Project {
+  const frame = project.frames.find((candidate) => candidate.id === frameId)
+  if (!frame || (enabled && frame.objects.some((object) => object.settings.zoomFollow))) return project
+  return updateProjectFrame(project, frameId, (current) => ({ ...current, settings: { ...current.settings, cameraPinned: enabled } }))
 }
 
 export function mergeFrameObjects(frame: Frame, analysis: Analysis, objectIds: string[]): { frame: Frame; analysis: Analysis; objectId: string } | null {
@@ -249,7 +261,7 @@ export function mergeFrameObjects(frame: Frame, analysis: Analysis, objectIds: s
       ...first.settings, objectId, blockId: id,
       order: Math.min(...selected.map((object) => object.settings.order)),
       drawDurationSec: selected.reduce((sum, object) => sum + object.settings.drawDurationSec, 0),
-      pinCamera: selected.some((object) => object.settings.pinCamera),
+      zoomFollow: selected.some((object) => object.settings.zoomFollow),
       pushEntry: selected.find((object) => object.settings.pushEntry.enabled)?.settings.pushEntry ?? first.settings.pushEntry,
     },
   }

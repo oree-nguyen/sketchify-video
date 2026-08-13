@@ -1,5 +1,6 @@
 import type { FrameSettings } from './settingsDefaults'
 import type { HandStyleId, Project, TransitionType } from './projectStore'
+import { DEFAULT_SETTINGS } from './settingsDefaults'
 import { audioBufferToBase64, base64ToAudioBuffer, bytesToBase64 } from './audioSerialization'
 
 const DB_NAME = 'sketchify-sessions'
@@ -54,7 +55,8 @@ export async function restoreProject(serialized: SerializedProject): Promise<Pro
       const imageBytes = Uint8Array.from(atob(frame.imageBase64), (character) => character.charCodeAt(0))
       const sourceUrl = URL.createObjectURL(new Blob([imageBytes], { type: frame.imageMimeType }))
       const narration = frame.narration ? { text: frame.narration.text, voiceId: frame.narration.voiceId, audioBuffer: await base64ToAudioBuffer(frame.narration.audioBase64, audioContext), generatedAt: frame.narration.generatedAt } : undefined
-      return { id: frame.id, name: frame.name, sourceUrl, settings: frame.settings, objects: [], transitionToNext: frame.transitionToNext, durationSec: frame.settings.holdDurationSec, analysis: null, dirty: true, imageSource: frame.imageSource, narration }
+      const settings = { ...structuredClone(DEFAULT_SETTINGS), ...frame.settings, camera: { ...DEFAULT_SETTINGS.camera, ...frame.settings.camera }, pageZoom: { ...DEFAULT_SETTINGS.pageZoom, ...frame.settings.pageZoom }, cameraPinned: frame.settings.cameraPinned ?? false }
+      return { id: frame.id, name: frame.name, sourceUrl, settings, objects: [], transitionToNext: frame.transitionToNext, durationSec: settings.holdDurationSec, analysis: null, dirty: true, imageSource: frame.imageSource, narration }
     }))
     return { frames, activeFrameId: frames.some((frame) => frame.id === serialized.activeFrameId) ? serialized.activeFrameId : frames[0]?.id ?? null, handStyle: serialized.handStyle, playhead: { globalTimeSec: 0 }, audioClips: [] }
   } finally { await audioContext.close() }

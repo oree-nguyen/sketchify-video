@@ -44,6 +44,16 @@ const closeRect = (actual: Rect, expected: Rect) => {
 }
 
 describe('camera auto-follow theo DrawUnit thật', () => {
+  it('chỉ focus vật thể bật zoom và cameraPinned luôn giữ toàn khung', () => {
+    const blocks = [block(10, { x: 40, y: 80, w: 120, h: 100 }), block(20, { x: 800, y: 300, w: 120, h: 100 })]
+    const units = [unit(10, 0, 0.5), unit(20, 0.5, 1)]
+    const selective = buildCameraTimeline(settings(), blocks, units, 1000, 500, [20])
+    expect(selective.focusSpans.map((span) => span.blockId)).toEqual([20])
+    expect(buildCameraTimeline(settings(), blocks, units, 1000, 500, []).focusSpans).toHaveLength(0)
+    const pinned = settings(); pinned.cameraPinned = true
+    const fixed = buildCameraTimeline(pinned, blocks, units, 1000, 500, [20])
+    expect(fixed.keys.every((key) => key.crop.x === 0 && key.crop.y === 0 && key.crop.w === 1000 && key.crop.h === 500)).toBe(true)
+  })
   it('focus block 1 rồi chuyển đúng sang block 2 tại t0 của block 2', () => {
     const blocks = [block(10, { x: 40, y: 80, w: 120, h: 100 }), block(20, { x: 800, y: 300, w: 120, h: 100 })]
     const units = [unit(10, 0, 0.5), unit(20, 0.5, 1)]
@@ -100,10 +110,10 @@ describe('các bất biến camera §11', () => {
     expect(crop.y + crop.h).toBeGreaterThanOrEqual(bbox.y + bbox.h)
   })
 
-  it('pin thắng mode off và dùng đúng t0 của DrawUnit', () => {
+  it('mode off giữ full-frame dù vật thể bật Zoom theo vật thể', () => {
     const blocks = [block(7, { x: 400, y: 200, w: 80, h: 80 })]
     const timeline = buildCameraTimeline(settings('off'), blocks, [unit(7, 0.35, 0.6)], 800, 450, [7])
-    expect(timeline.keys.some((key) => key.role === 'pin' && key.blockId === 7 && key.t === 0.35)).toBe(true)
+    expect(timeline.keys.every((key) => key.crop.x === 0 && key.crop.y === 0 && key.crop.w === 800 && key.crop.h === 450)).toBe(true)
   })
 
   it('crop thủ công cũng bắt buộc đi qua fitRect', () => {

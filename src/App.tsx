@@ -9,7 +9,7 @@ import { beginPollinationsAuth, consumeAuthCallbackResult, disconnectPollination
 import { generateImage as pollinationsGenerateImage, generateSpeech, generateStoryScript } from './ai/pollinationsClient'
 import type { StoryProgress, StoryScene, StorySceneFailure } from './ai/types'
 import { ProjectPlayer } from './render/ProjectPlayer'
-import { createFrame, createFrameFromSource, frameDrawDurationSec, mergeFrameObjects, objectDropInsertionIndex, reconcileFrameObjects, setFrameCamera, setFrameHold, setFramePageZoom, setFrameTransition, setObjectDuration, setObjectEffect, setObjectOrder, setObjectPinCamera, setObjectPush, syncFrameDuration, type AudioClip, type Frame, type ObjectSettings, type Project } from './state/projectStore'
+import { createFrame, createFrameFromSource, frameDrawDurationSec, mergeFrameObjects, objectDropInsertionIndex, reconcileFrameObjects, setFrameCamera, setFrameCameraPinned, setFrameHold, setFramePageZoom, setFrameTransition, setObjectDuration, setObjectEffect, setObjectOrder, setObjectPush, setObjectZoomFollow, syncFrameDuration, type AudioClip, type Frame, type ObjectSettings, type Project } from './state/projectStore'
 import type { FrameSettings } from './state/settingsDefaults'
 import { buildProjectTimeline } from './timeline/projectTimeline'
 import { analyzeImage, type Analysis } from './wasm/wasmClient'
@@ -164,6 +164,7 @@ export default function App() {
     if (patch.holdDurationSec !== undefined) next = setFrameHold(next, frameId, patch.holdDurationSec)
     if (patch.camera) next = setFrameCamera(next, frameId, patch.camera)
     if (patch.pageZoom) next = setFramePageZoom(next, frameId, patch.pageZoom)
+    if (patch.cameraPinned !== undefined) next = setFrameCameraPinned(next, frameId, patch.cameraPinned)
     return next
   })
 
@@ -182,7 +183,7 @@ export default function App() {
     if (strokeWidth !== undefined) effectPatch.strokeWidth = strokeWidth
     if (Object.keys(effectPatch).length) next = setObjectEffect(next, frameId, objectId, effectPatch)
     if (patch.pushEntry) next = setObjectPush(next, frameId, objectId, patch.pushEntry)
-    if (patch.pinCamera !== undefined) next = setObjectPinCamera(next, frameId, objectId, patch.pinCamera)
+    if (patch.zoomFollow !== undefined) next = setObjectZoomFollow(next, frameId, objectId, patch.zoomFollow)
     return next
   })
 
@@ -199,8 +200,8 @@ export default function App() {
     setSelectedObjectIds(objectId ? [objectId] : [])
   }
 
-  const toggleObjectSelection = (objectId: string) => setSelectedObjectIds((current) => {
-    const next = current.includes(objectId) ? current.filter((id) => id !== objectId) : [...current, objectId]
+  const toggleObjectSelection = (objectId: string, additive = false) => setSelectedObjectIds((current) => {
+    const next = additive ? (current.includes(objectId) ? current.filter((id) => id !== objectId) : [...current, objectId]) : [objectId]
     setSelectedObjectId(next.at(-1) ?? null)
     return next
   })
@@ -457,9 +458,9 @@ export default function App() {
       <section className="stage spotlight-surface" onPointerMove={handleSpotlight}>
         <div className="stage-topline"><span>{active ? `KHUNG ${project.frames.findIndex((frame) => frame.id === active.id) + 1}` : 'SẴN SÀNG'}</span><span className="stage-diagnostics">{analysis && !showRender && <button className={`mask-toggle ${showInkMask ? 'active' : ''}`} type="button" aria-pressed={showInkMask} onClick={() => setShowInkMask((value) => !value)}>Ink mask</button>}<span>{analysisStatus === 'working' ? 'Đang phân tích bằng WASM…' : analysis ? `${analysis.blocks.length} vật thể đã tách` : analysisStatus === 'error' ? 'Không thể phân tích ảnh' : 'Thêm ảnh để bắt đầu'}</span></span></div>
         <div className={`preview ${showRender ? 'has-render' : ''}`}>
-          <canvas ref={canvasRef} className="render-canvas" aria-label="Canvas xem thử" />
-          {active && !showRender && <div className="analyzed-image">
-            <img className="source-image" src={active.sourceUrl} alt="Khung hiện tại" />
+          {active && <div className="analyzed-image">
+            <canvas ref={canvasRef} className="render-canvas" aria-label="Canvas xem thử" />
+            {!showRender && <img className="source-image" src={active.sourceUrl} alt="Khung hiện tại" />}
             {analysis && showInkMask && <InkMaskOverlay analysis={analysis} />}
             {analysis && <div className="block-overlay">{analysis.blocks.map((block) => {
               const object = active.objects.find((item) => item.blockId === block.id)
@@ -473,6 +474,7 @@ export default function App() {
               }} style={{ left: `${block.bbox.x / analysis.img.w * 100}%`, top: `${block.bbox.y / analysis.img.h * 100}%`, width: `${block.bbox.w / analysis.img.w * 100}%`, height: `${block.bbox.h / analysis.img.h * 100}%` }}><b>{object ? object.settings.order + 1 : block.id + 1}</b></button>
             })}</div>}
           </div>}
+          {!active && <canvas ref={canvasRef} className="render-canvas" aria-label="Canvas xem thử" />}
           {!active && <div className="empty-preview"><strong>Biến ảnh thành câu chuyện được vẽ</strong><p>Tải ảnh của bạn hoặc để AI tạo trọn storyboard tiếng Việt.</p><div className="empty-actions"><button className="export" onClick={() => fileRef.current?.click()}>Tải ảnh lên</button><button className="quiet" onClick={() => openAiDialog()}>Tạo video từ chủ đề…</button></div></div>}
         </div>
         <div className="transport"><button disabled={isPlaying} onClick={() => setProgress(Math.max(0, progress - 10))}>−10</button><button className="play" disabled={!active} onClick={() => void play(false)}>{isPlaying ? 'Ⅱ' : '▶'}</button><button disabled={isPlaying} onClick={() => setProgress(Math.min(total, progress + 10))}>+10</button><span className="duration">{formatTime(progress)} / {formatTime(total)}</span></div>

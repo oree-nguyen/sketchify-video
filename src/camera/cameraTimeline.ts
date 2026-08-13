@@ -156,14 +156,14 @@ export function buildCameraTimeline(
   units: DrawUnit[],
   frameW: number,
   frameH: number,
-  pinnedBlockIds: number[] = [],
+  zoomBlockIds?: number[],
   drawDurationSec = 1,
 ): CameraTimeline {
   const aspect = frameW / frameH
   const all = fullFrame(frameW, frameH)
-  const focusSpans = buildBlockFocusSpans(blocks, units, settings, frameW, frameH)
-  const spanById = new Map(focusSpans.map((span) => [span.blockId, span]))
-  let mode = settings.camera.mode
+  const enabledZoom = new Set(zoomBlockIds ?? blocks.map((block) => block.id))
+  const focusSpans = buildBlockFocusSpans(blocks, units, settings, frameW, frameH).filter((span) => enabledZoom.has(span.blockId))
+  let mode = settings.cameraPinned ? 'off' : settings.camera.mode
   let fellBack = false
   let reason: string | undefined
 
@@ -200,11 +200,7 @@ export function buildCameraTimeline(
     keys = autoFollowKeys(focusSpans, all, settings.camera.zoomOutPortion)
   }
 
-  keys.push(...buildPageZoomKeys(blocks, units, settings, frameW, frameH, drawDurationSec))
-  for (const blockId of pinnedBlockIds) {
-    const span = spanById.get(blockId)
-    if (span) keys.push({ t: span.t0, crop: span.crop, easing: 'easeInOutCubic', role: 'pin', blockId })
-  }
+  if (!settings.cameraPinned) keys.push(...buildPageZoomKeys(blocks, units, settings, frameW, frameH, drawDurationSec))
 
   keys = mergeRedundantAndBridge(keys, aspect, frameW, frameH, settings.camera.zoomLevel)
   keys = limitCameraSpeed(keys, drawDurationSec, frameW)

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_SETTINGS } from './settingsDefaults'
-import { frameDrawDurationSec, frameDurationSec, mergeFrameObjects, objectDropInsertionIndex, reconcileFrameObjects, reorderFrameObjects, retimeAnalysisForFrame, setObjectOrder, updateObjectSettings, type Frame, type Project } from './projectStore'
+import { frameDrawDurationSec, frameDurationSec, mergeFrameObjects, objectDropInsertionIndex, reconcileFrameObjects, reorderFrameObjects, retimeAnalysisForFrame, setFrameCameraPinned, setObjectOrder, setObjectZoomFollow, updateObjectSettings, type Frame, type Project } from './projectStore'
 import type { Analysis, Block } from '../wasm/wasmClient'
 
 const block = (id: number, x: number): Block => ({
@@ -22,6 +22,15 @@ const makeFrame = (id: number, blocks: Block[]): Frame => ({
 })
 
 describe('FrameObject contract', () => {
+  it('store chặn xung đột Ghim camera và Zoom theo vật thể ở cả hai chiều', () => {
+    const frame = makeFrame(99, [block(1, 0)])
+    let project: Project = { frames: [frame], activeFrameId: frame.id, handStyle: 'pencil', playhead: { globalTimeSec: 0 }, audioClips: [] }
+    expect(setFrameCameraPinned(project, frame.id, true)).toBe(project)
+    project = setObjectZoomFollow(project, frame.id, frame.objects[0].objectId, false)
+    project = setFrameCameraPinned(project, frame.id, true)
+    expect(project.frames[0].settings.cameraPinned).toBe(true)
+    expect(setObjectZoomFollow(project, frame.id, frame.objects[0].objectId, true)).toBe(project)
+  })
   it('suy ra 15 giây vẽ và 17 giây tổng từ [1,2,3,4,5] + hold 2', () => {
     let frame = makeFrame(1, [0, 1, 2, 3, 4].map((id) => block(id, id * 15)))
     frame.objects.forEach((object, index) => { frame = updateObjectSettings(frame, object.objectId, { drawDurationSec: index + 1 }) })
@@ -37,7 +46,7 @@ describe('FrameObject contract', () => {
 
   it('đổi Object #2 không sửa Object khác và không đặt dirty/reanalyze', () => {
     const before = makeFrame(2, [block(0, 0), block(1, 20), block(2, 40)])
-    const changed = updateObjectSettings(before, before.objects[1].objectId, { drawDurationSec: 7, pinCamera: true })
+    const changed = updateObjectSettings(before, before.objects[1].objectId, { drawDurationSec: 7, zoomFollow: true })
     expect(changed.objects[0]).toEqual(before.objects[0])
     expect(changed.objects[2]).toEqual(before.objects[2])
     expect(changed.objects[1].settings.drawDurationSec).toBe(7)
@@ -69,11 +78,11 @@ describe('FrameObject contract', () => {
 
   it('reconcile giữ settings theo hình học dù blockId đổi', () => {
     let frame = makeFrame(4, [block(0, 0), block(1, 50)])
-    frame = updateObjectSettings(frame, frame.objects[1].objectId, { drawDurationSec: 9, pushEntry: { enabled: true, edge: 'right' } })
+    frame = updateObjectSettings(frame, frame.objects[1].objectId, { drawDurationSec: 9, pushEntry: { enabled: true, edge: 'right', handStyle: '2' } })
     const moved = [block(90, 1), block(91, 51)]
     const reconciled = reconcileFrameObjects(frame.id, moved, frame.objects)
     expect(reconciled.find((object) => object.blockId === 91)?.settings.drawDurationSec).toBe(9)
-    expect(reconciled.find((object) => object.blockId === 91)?.settings.pushEntry).toEqual({ enabled: true, edge: 'right' })
+    expect(reconciled.find((object) => object.blockId === 91)?.settings.pushEntry).toEqual({ enabled: true, edge: 'right', handStyle: '2' })
   })
 
   it('gom nhiều vật thể thành một block thật và giữ toàn bộ DrawUnit', () => {

@@ -12,6 +12,7 @@ export interface FrameSettings {
   camera:{mode:CameraMode;zoomPadding:number;zoomLevel:number;zoomOutPortion:number;maxBlocksForAutoFollow:number;manualKeyframes:Array<{blockId:number;crop:{x:number;y:number;w:number;h:number}}>}
   pageZoom:{enabled:boolean;mode:PageZoomMode;pageGroups:number[][];transitionSec:number;padding:number}
   handPushEnding:{enabled:boolean}
+  cameraPinned:boolean
 }
 
 export const DEFAULT_SETTINGS:FrameSettings={
@@ -23,4 +24,5 @@ export const DEFAULT_SETTINGS:FrameSettings={
   camera:{mode:'D-hybrid',zoomPadding:.12,zoomLevel:2.6,zoomOutPortion:.18,maxBlocksForAutoFollow:25,manualKeyframes:[]},
   pageZoom:{enabled:false,mode:'auto-rows',pageGroups:[],transitionSec:1,padding:.08},
   handPushEnding:{enabled:false},
+  cameraPinned:false,
 }
