@@ -38,6 +38,12 @@ Có thể nhập App Key trong hộp “Kết nối AI”, hoặc cấu hình `V
 
 Luồng BYOP dùng fragment redirect legacy mà Pollinations vẫn hỗ trợ cho client tĩnh. Kịch bản, ảnh và audio được gọi tuần tự; lỗi tại một cảnh không xoá các cảnh đã xong và có thể thử lại riêng cảnh lỗi.
 
+## Lồng tiếng Piper và phiên làm việc
+
+Piper chạy trực tiếp trong một Web Worker riêng. Giọng Việt được tải lazy từ `public/voices/`; ONNX Runtime và phonemizer cũng được phục vụ cùng origin, nên không gọi dịch vụ TTS trả phí. Dữ liệu dự án được tự động lưu vào IndexedDB sau khoảng 2 giây và có thể tạo/mở/đổi tên/xoá snapshot trong menu **Phiên làm việc**. Session chỉ lưu ảnh, settings và audio WAV dạng base64; dữ liệu phân tích được tính lại khi khôi phục.
+
+Xem nguồn và license của model/runtime tại [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
 ## Hai thiết lập đáng chú ý
 
 - `mergeRadius`: được cố định ở `0px` theo hợp đồng hiện tại và không hiển thị trong UI.

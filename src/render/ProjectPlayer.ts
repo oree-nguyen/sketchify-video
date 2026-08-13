@@ -34,7 +34,7 @@ export class ProjectPlayer {
     const requestedStartId = record ? this.project.frames[0]?.id : this.project.activeFrameId
     const startFrameIndex = Math.max(0, this.project.frames.findIndex((frame) => frame.id === requestedStartId))
     const firstSegment = timeline.segments[startFrameIndex] ?? timeline.segments[0]
-    const audio = await ProjectAudioSession.create(this.project, record)
+    const audio = await ProjectAudioSession.create(this.project, record, firstSegment.startSec)
     const recorder = record ? makeRecorder(this.canvas, this.project.frames[0].settings.fps, audio?.captureStream) : undefined
     const chunks: BlobPart[] = []
     if (record && !recorder) throw new Error('Trình duyệt không hỗ trợ MediaRecorder')
@@ -224,8 +224,8 @@ class ProjectAudioSession {
     this.captureStream = destination?.stream
   }
 
-  static async create(project: Project, capture: boolean): Promise<ProjectAudioSession | null> {
-    if (!project.audioClips.length) return null
+  static async create(project: Project, capture: boolean, playbackStartSec = 0): Promise<ProjectAudioSession | null> {
+    if (!project.audioClips.length && !project.frames.some((frame) => frame.narration?.audioBuffer)) return null
     const context = new AudioContext()
     const captureDestination = capture ? context.createMediaStreamDestination() : undefined
     const session = new ProjectAudioSession(context, captureDestination)
@@ -239,7 +239,17 @@ class ProjectAudioSession {
         source.connect(context.destination)
         if (captureDestination) source.connect(captureDestination)
         const startSec = timeline.segments.find((segment) => segment.frameId === clip.frameId)?.startSec ?? clip.startSec
-        session.sources.push({ source, startSec })
+        session.sources.push({ source, startSec: Math.max(0, startSec - playbackStartSec) })
+      }
+      for (const frame of project.frames) {
+        const buffer = frame.narration?.audioBuffer
+        if (!buffer || project.audioClips.some((clip) => clip.frameId === frame.id)) continue
+        const source = context.createBufferSource()
+        source.buffer = buffer
+        source.connect(context.destination)
+        if (captureDestination) source.connect(captureDestination)
+        const startSec = timeline.segments.find((segment) => segment.frameId === frame.id)?.startSec ?? 0
+        if (startSec + buffer.duration >= playbackStartSec) session.sources.push({ source, startSec: Math.max(0, startSec - playbackStartSec) })
       }
       return session
     } catch (error) {

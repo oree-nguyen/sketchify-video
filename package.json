@@ -20,7 +20,9 @@
     "test:go": "go test ./wasm-src"
   },
   "dependencies": {
+    "@mintplex-labs/piper-tts-web": "^1.0.3",
     "@vitejs/plugin-react": "latest",
+    "onnxruntime-web": "^1.18.0",
     "react": "latest",
     "react-dom": "latest",
     "typescript": "latest",

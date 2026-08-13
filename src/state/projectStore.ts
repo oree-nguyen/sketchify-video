@@ -40,6 +40,14 @@ export interface Frame {
   dirty: boolean
   imageSource: 'upload' | 'ai-generated'
   aiGeneration?: { prompt: string; generatedAt: string }
+  narration?: FrameNarration
+}
+
+export interface FrameNarration {
+  text: string
+  voiceId: string
+  audioBuffer: AudioBuffer | null
+  generatedAt: string
 }
 
 export interface AudioClip {

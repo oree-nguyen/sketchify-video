@@ -3,14 +3,18 @@ import { fitRect } from './camera/cameraTimeline'
 import { EditPanel, HandPanel } from './components/EditorControls'
 import { FramePanel } from './components/FrameTimeline'
 import { AIGenerationDialog } from './components/AIGenerationDialog'
+import { NarrationBar } from './components/NarrationBar'
+import { SessionDialog } from './components/SessionDialog'
 import { beginPollinationsAuth, consumeAuthCallbackResult, disconnectPollinations, getPollinationsAccessKey, getPollinationsAppKey, getPollinationsRedirectUri, savePollinationsAppKey } from './ai/pollinationsAuth'
 import { generateImage as pollinationsGenerateImage, generateSpeech, generateStoryScript } from './ai/pollinationsClient'
 import type { StoryProgress, StoryScene, StorySceneFailure } from './ai/types'
 import { ProjectPlayer } from './render/ProjectPlayer'
-import { createFrame, createFrameFromSource, mergeFrameObjects, objectDropInsertionIndex, reconcileFrameObjects, setFrameCamera, setFrameHold, setFramePageZoom, setFrameTransition, setObjectDuration, setObjectEffect, setObjectOrder, setObjectPinCamera, setObjectPush, syncFrameDuration, type AudioClip, type Frame, type ObjectSettings, type Project } from './state/projectStore'
+import { createFrame, createFrameFromSource, frameDrawDurationSec, mergeFrameObjects, objectDropInsertionIndex, reconcileFrameObjects, setFrameCamera, setFrameHold, setFramePageZoom, setFrameTransition, setObjectDuration, setObjectEffect, setObjectOrder, setObjectPinCamera, setObjectPush, syncFrameDuration, type AudioClip, type Frame, type ObjectSettings, type Project } from './state/projectStore'
 import type { FrameSettings } from './state/settingsDefaults'
 import { buildProjectTimeline } from './timeline/projectTimeline'
 import { analyzeImage, type Analysis } from './wasm/wasmClient'
+import { synthesizePiper, type PiperProgress } from './audio/piperClient'
+import { CURRENT_SESSION_ID, deleteSession, listSessions, loadSession, makeSessionRecord, restoreProject, saveSession, type SessionSummary } from './state/sessionStore'
 
 export default function App() {
   const [project, setProject] = useState<Project>({ frames: [], activeFrameId: null, handStyle: 'pencil', playhead: { globalTimeSec: 0 }, audioClips: [] })
@@ -30,6 +34,11 @@ export default function App() {
   const [aiBusy, setAiBusy] = useState(false)
   const [aiProgress, setAiProgress] = useState<StoryProgress | null>(null)
   const [aiFailures, setAiFailures] = useState<StorySceneFailure[]>([])
+  const [piperBusy, setPiperBusy] = useState(false)
+  const [piperProgress, setPiperProgress] = useState<PiperProgress | null>(null)
+  const [sessionsOpen, setSessionsOpen] = useState(false)
+  const [sessions, setSessions] = useState<SessionSummary[]>([])
+  const [sessionReady, setSessionReady] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const playerRef = useRef<{ stop(): void } | null>(null)
@@ -60,14 +69,23 @@ export default function App() {
     }
   }, [])
   useEffect(() => {
-    const snapshot = {
-      activeFrameId: project.activeFrameId,
-      handStyle: project.handStyle,
-      frames: project.frames.map(({ analysis: _analysis, sourceUrl: _sourceUrl, ...frame }) => frame),
-      audioClips: project.audioClips.map(({ sourceUrl: _sourceUrl, ...clip }) => clip),
-    }
-    localStorage.setItem('sketchify-video-project', JSON.stringify(snapshot))
-  }, [project.frames, project.activeFrameId, project.handStyle, project.audioClips])
+    void (async () => {
+      try {
+        const current = await loadSession(CURRENT_SESSION_ID)
+        if (current) setProject(await restoreProject(current.projectJson))
+        setSessions(await listSessions())
+      } catch (error) { console.error('[Sketchify] Không thể khôi phục phiên hiện tại', error) }
+      finally { setSessionReady(true) }
+    })()
+  }, [])
+  useEffect(() => {
+    if (!sessionReady) return
+    const timeout = window.setTimeout(() => void (async () => {
+      try { await saveSession(await makeSessionRecord(project, CURRENT_SESSION_ID, 'Phiên đang làm')) }
+      catch (error) { console.error('[Sketchify] Tự động lưu thất bại', error) }
+    })(), 2000)
+    return () => window.clearTimeout(timeout)
+  }, [sessionReady, project.frames, project.activeFrameId, project.handStyle, project.audioClips])
 
   const inspect = async (frameId: number, url: string, settings: FrameSettings): Promise<Analysis | null> => {
     setAnalysisStatus('working')
@@ -197,6 +215,40 @@ export default function App() {
     setSelectedObjectIds([result.objectId])
   }
 
+  const createPiperNarration = async (text: string, voiceId: string) => {
+    if (!active) return
+    const frameId = active.id
+    setPiperBusy(true); setPiperProgress({ phase: 'download', percent: 0 })
+    try {
+      const audioBuffer = await synthesizePiper(text, voiceId, setPiperProgress)
+      setProject((current) => ({ ...current, frames: current.frames.map((frame) => {
+        if (frame.id !== frameId) return frame
+        const requiredHold = Math.max(frame.settings.holdDurationSec, audioBuffer.duration - frameDrawDurationSec(frame))
+        return syncFrameDuration({ ...frame, settings: { ...frame.settings, holdDurationSec: Math.max(0, requiredHold) }, narration: { text: text.trim(), voiceId, audioBuffer, generatedAt: new Date().toISOString() } })
+      }) }))
+    } catch (error) { window.alert(errorMessage(error)) }
+    finally { setPiperBusy(false); setPiperProgress(null) }
+  }
+
+  const refreshSessions = async () => setSessions(await listSessions())
+  const saveNamedSession = async () => {
+    const name = window.prompt('Tên phiên làm việc', `Phiên ${new Date().toLocaleString('vi-VN')}`)?.trim()
+    if (!name) return
+    await saveSession(await makeSessionRecord(project, crypto.randomUUID(), name)); await refreshSessions()
+  }
+  const openSession = async (id: string) => {
+    const record = await loadSession(id); if (!record) return
+    project.frames.forEach((frame) => URL.revokeObjectURL(frame.sourceUrl))
+    setAnalyses({}); setShowRender(false); setSelectedObjectId(null); setSelectedObjectIds([])
+    setProject(await restoreProject(record.projectJson)); setSessionsOpen(false)
+  }
+  const renameSession = async (session: SessionSummary) => {
+    const name = window.prompt('Đổi tên phiên', session.name)?.trim(); if (!name) return
+    const record = await loadSession(session.id); if (!record) return
+    await saveSession({ ...record, name, updatedAt: new Date().toISOString() }); await refreshSessions()
+  }
+  const removeSession = async (id: string) => { if (window.confirm('Xoá snapshot phiên này?')) { await deleteSession(id); await refreshSessions() } }
+
   const requireAiKey = (): string => {
     const key = getPollinationsAccessKey()
     if (!key) throw new Error('Hãy kết nối Pollinations trước khi tạo nội dung.')
@@ -241,14 +293,17 @@ export default function App() {
 
   const addNarration = async (frameId: number, scene: StoryScene): Promise<void> => {
     const blob = await generateSpeech(requireAiKey(), scene.narrationText)
-    const durationSec = await measureAudioDuration(blob)
+    const audioContext = new AudioContext()
+    const audioBuffer = await audioContext.decodeAudioData(await blob.arrayBuffer())
+    await audioContext.close()
+    const durationSec = audioBuffer.duration
     const sourceUrl = URL.createObjectURL(blob)
     setProject((current) => {
       const frame = current.frames.find((item) => item.id === frameId)
       if (!frame) { URL.revokeObjectURL(sourceUrl); return current }
       const extraHold = Math.max(0, durationSec - frame.durationSec)
       const frames = current.frames.map((item) => item.id === frameId
-        ? syncFrameDuration({ ...item, settings: { ...item.settings, holdDurationSec: item.settings.holdDurationSec + extraHold } })
+        ? syncFrameDuration({ ...item, settings: { ...item.settings, holdDurationSec: item.settings.holdDurationSec + extraHold }, narration: { text: scene.narrationText, voiceId: 'pollinations', audioBuffer, generatedAt: new Date().toISOString() } })
         : item)
       const timeline = buildProjectTimeline({ ...current, frames })
       const startSec = timeline.segments.find((segment) => segment.frameId === frameId)?.startSec ?? 0
@@ -388,6 +443,7 @@ export default function App() {
     <header className="topbar">
       <div className="brand"><span className="brand-mark">S</span><span>Sketchify <b>Video</b></span><small>LOCAL EDITOR</small></div>
       <div className="top-actions">
+        <button className="quiet" onClick={() => { void refreshSessions(); setSessionsOpen(true) }}>Phiên làm việc</button>
         <button className={`ai-connect ${aiConnected ? 'connected' : ''}`} onClick={() => aiConnected ? openAiDialog() : connectPollinations()}>{aiConnected ? 'AI đã kết nối' : 'Kết nối AI'}</button>
         <button className="quiet" disabled={!active} onClick={() => void play(false)}>{isPlaying ? 'Dừng' : 'Xem thử'}</button>
         <button className="export" disabled={!active || !supported || isPlaying} onClick={() => void play(true)}>Tạo .webm</button>
@@ -421,6 +477,7 @@ export default function App() {
         </div>
         <div className="transport"><button disabled={isPlaying} onClick={() => setProgress(Math.max(0, progress - 10))}>−10</button><button className="play" disabled={!active} onClick={() => void play(false)}>{isPlaying ? 'Ⅱ' : '▶'}</button><button disabled={isPlaying} onClick={() => setProgress(Math.min(total, progress + 10))}>+10</button><span className="duration">{formatTime(progress)} / {formatTime(total)}</span></div>
         <input aria-label="Playhead" className="scrubber range-input" type="range" min="0" max={Math.max(total, 1)} step=".1" value={Math.min(progress, total)} style={{ '--range-progress': `${rangeProgress}%` } as CSSProperties} onChange={(event) => setProgress(Number(event.target.value))} />
+        {active && <NarrationBar frame={active} busy={piperBusy} progress={piperProgress} create={(text, voiceId) => void createPiperNarration(text, voiceId)} />}
       </section>
       <aside className="inspector spotlight-surface" onPointerMove={handleSpotlight}>
         <nav className="tool-rail"><button className={panel === 'hand' ? 'active' : ''} onClick={() => setPanel('hand')} aria-label="Bàn tay" title="Bàn tay">✎</button>{active && <button className={panel === 'edit' ? 'active' : ''} onClick={() => setPanel('edit')} aria-label="Chỉnh sửa" title="Chỉnh sửa">☷</button>}</nav>
@@ -436,6 +493,7 @@ export default function App() {
       connect={(appKey) => { savePollinationsAppKey(appKey); beginPollinationsAuth(appKey) }}
       disconnect={() => { disconnectPollinations(); setAiConnected(false); setAiProgress({ phase: 'script', message: 'Đã ngắt kết nối Pollinations.' }) }}
       generateImage={generateAiImage} generateStory={generateStory} retryFailure={retryAiFailure} />
+    <SessionDialog open={sessionsOpen} sessions={sessions} close={() => setSessionsOpen(false)} save={() => void saveNamedSession()} load={(id) => void openSession(id)} rename={(session) => void renameSession(session)} remove={(id) => void removeSession(id)} />
   </main>
 }
 
@@ -445,12 +503,6 @@ function errorMessage(error: unknown): string { return error instanceof Error ? 
 
 class AnalysisStageError extends Error {
   constructor(message: string, readonly frameId: number) { super(message) }
-}
-
-async function measureAudioDuration(blob: Blob): Promise<number> {
-  const context = new AudioContext()
-  try { return (await context.decodeAudioData(await blob.arrayBuffer())).duration }
-  finally { await context.close() }
 }
 
 function InkMaskOverlay({ analysis }: { analysis: Analysis }) {
