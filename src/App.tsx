@@ -4,20 +4,20 @@ import { EditPanel, HandPanel } from './components/EditorControls'
 import { FramePanel } from './components/FrameTimeline'
 import { AIGenerationDialog } from './components/AIGenerationDialog'
 import { NarrationBar } from './components/NarrationBar'
-import { SessionDialog } from './components/SessionDialog'
+import { SessionSwitcher } from './components/SessionSwitcher'
 import { beginPollinationsAuth, consumeAuthCallbackResult, disconnectPollinations, getPollinationsAccessKey, getPollinationsAppKey, getPollinationsRedirectUri, savePollinationsAppKey } from './ai/pollinationsAuth'
 import { generateImage as pollinationsGenerateImage, generateSpeech, generateStoryScript } from './ai/pollinationsClient'
 import type { StoryProgress, StoryScene, StorySceneFailure } from './ai/types'
 import { ProjectPlayer } from './render/ProjectPlayer'
-import { createFrame, createFrameFromSource, frameDrawDurationSec, mergeFrameObjects, objectDropInsertionIndex, reconcileFrameObjects, setFrameCamera, setFrameCameraPinned, setFrameHold, setFramePageZoom, setFramePauseSettings, setFrameTransition, setObjectDuration, setObjectEffect, setObjectOrder, setObjectPush, setObjectZoomFollow, syncFrameDuration, type AudioClip, type Frame, type ObjectSettings, type Project } from './state/projectStore'
+import { createEmptyProject, createFrame, createFrameFromSource, frameDrawDurationSec, mergeFrameObjects, objectDropInsertionIndex, reconcileFrameObjects, setFrameCamera, setFrameCameraPinned, setFrameHold, setFramePageZoom, setFramePauseSettings, setFrameTransition, setObjectDuration, setObjectEffect, setObjectOrder, setObjectPush, setObjectZoomFollow, syncFrameDuration, type AudioClip, type Frame, type ObjectSettings, type Project } from './state/projectStore'
 import type { FrameSettings } from './state/settingsDefaults'
 import { buildProjectTimeline } from './timeline/projectTimeline'
 import { analyzeImage, type Analysis } from './wasm/wasmClient'
 import { synthesizePiper, type PiperProgress } from './audio/piperClient'
-import { CURRENT_SESSION_ID, deleteSession, listSessions, loadSession, makeSessionRecord, restoreProject, saveSession, type SessionSummary } from './state/sessionStore'
+import { createSession, deleteSession, listSessions, loadSession, makeSessionRecord, resolveInitialSession, restoreProject, saveSession, setActiveSessionId, type SessionSummary } from './state/sessionStore'
 
 export default function App() {
-  const [project, setProject] = useState<Project>({ frames: [], activeFrameId: null, handStyle: 'pencil', playhead: { globalTimeSec: 0 }, audioClips: [] })
+  const [project, setProject] = useState<Project>(() => createEmptyProject())
   const [analyses, setAnalyses] = useState<Record<number, Analysis>>({})
   const [analysisStatus, setAnalysisStatus] = useState<'idle' | 'working' | 'error'>('idle')
   const [isPlaying, setIsPlaying] = useState(false)
@@ -36,12 +36,23 @@ export default function App() {
   const [aiFailures, setAiFailures] = useState<StorySceneFailure[]>([])
   const [piperBusy, setPiperBusy] = useState(false)
   const [piperProgress, setPiperProgress] = useState<PiperProgress | null>(null)
-  const [sessionsOpen, setSessionsOpen] = useState(false)
   const [sessions, setSessions] = useState<SessionSummary[]>([])
+  const [activeSessionId, setActiveSessionIdState] = useState<string | null>(null)
+  const [activeSessionName, setActiveSessionName] = useState('')
+  const [activeSessionCreatedAt, setActiveSessionCreatedAt] = useState('')
   const [sessionReady, setSessionReady] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const playerRef = useRef<{ stop(): void } | null>(null)
+  const sessionSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
+
+  const queueSessionSave = (snapshot: Project, id: string, name: string, createdAt: string) => {
+    const task = sessionSaveQueueRef.current.catch(() => undefined).then(async () => {
+      await saveSession(await makeSessionRecord(snapshot, id, name, createdAt))
+    })
+    sessionSaveQueueRef.current = task
+    return task
+  }
 
   const active = project.frames.find((frame) => frame.id === project.activeFrameId) ?? null
   const analysis = active ? analyses[active.id] ?? null : null
@@ -71,21 +82,27 @@ export default function App() {
   useEffect(() => {
     void (async () => {
       try {
-        const current = await loadSession(CURRENT_SESSION_ID)
-        if (current) setProject(await restoreProject(current.projectJson))
+        const current = await resolveInitialSession(createEmptyProject())
+        setActiveSessionIdState(current.id)
+        setActiveSessionName(current.name)
+        setActiveSessionCreatedAt(current.createdAt)
+        setProject(await restoreProject(current.projectJson))
         setSessions(await listSessions())
       } catch (error) { console.error('[Sketchify] Không thể khôi phục phiên hiện tại', error) }
       finally { setSessionReady(true) }
     })()
   }, [])
   useEffect(() => {
-    if (!sessionReady) return
+    if (!sessionReady || !activeSessionId) return
     const timeout = window.setTimeout(() => void (async () => {
-      try { await saveSession(await makeSessionRecord(project, CURRENT_SESSION_ID, 'Phiên đang làm')) }
+      try {
+        await queueSessionSave(project, activeSessionId, activeSessionName, activeSessionCreatedAt)
+        setSessions(await listSessions())
+      }
       catch (error) { console.error('[Sketchify] Tự động lưu thất bại', error) }
     })(), 2000)
     return () => window.clearTimeout(timeout)
-  }, [sessionReady, project.frames, project.activeFrameId, project.handStyle, project.audioClips])
+  }, [sessionReady, activeSessionId, activeSessionName, activeSessionCreatedAt, project.frames, project.activeFrameId, project.handStyle, project.audioClips])
 
   const inspect = async (frameId: number, url: string, settings: FrameSettings): Promise<Analysis | null> => {
     setAnalysisStatus('working')
@@ -239,23 +256,65 @@ export default function App() {
   }
 
   const refreshSessions = async () => setSessions(await listSessions())
-  const saveNamedSession = async () => {
-    const name = window.prompt('Tên phiên làm việc', `Phiên ${new Date().toLocaleString('vi-VN')}`)?.trim()
-    if (!name) return
-    await saveSession(await makeSessionRecord(project, crypto.randomUUID(), name)); await refreshSessions()
+  const persistActiveSession = async () => {
+    if (!activeSessionId || !sessionReady) return
+    await queueSessionSave(project, activeSessionId, activeSessionName, activeSessionCreatedAt)
   }
-  const openSession = async (id: string) => {
-    const record = await loadSession(id); if (!record) return
+  const resetSessionRuntime = (nextProject: Project) => {
     project.frames.forEach((frame) => URL.revokeObjectURL(frame.sourceUrl))
-    setAnalyses({}); setShowRender(false); setSelectedObjectId(null); setSelectedObjectIds([])
-    setProject(await restoreProject(record.projectJson)); setSessionsOpen(false)
+    project.audioClips.forEach((clip) => URL.revokeObjectURL(clip.sourceUrl))
+    if (videoUrl) { URL.revokeObjectURL(videoUrl); setVideoUrl(null) }
+    playerRef.current?.stop()
+    setAnalyses({}); setAnalysisStatus('idle'); setShowRender(false); setShowInkMask(false)
+    setSelectedObjectId(null); setSelectedObjectIds([]); setEditScope('object'); setPanel('hand')
+    setProject(nextProject)
+  }
+  const activateSession = async (id: string, saveCurrent = true) => {
+    if (id === activeSessionId) return
+    const record = await loadSession(id); if (!record) return
+    setSessionReady(false)
+    try {
+      if (saveCurrent) await persistActiveSession()
+      await setActiveSessionId(record.id)
+      const restored = await restoreProject(record.projectJson)
+      resetSessionRuntime(restored)
+      setActiveSessionIdState(record.id); setActiveSessionName(record.name); setActiveSessionCreatedAt(record.createdAt)
+      setSessions(await listSessions())
+    } finally { setSessionReady(true) }
+  }
+  const newSession = async (saveCurrent = true) => {
+    setSessionReady(false)
+    try {
+      if (saveCurrent) await persistActiveSession()
+      const blank = createEmptyProject()
+      const name = `Phiên mới ${(await listSessions()).length + 1}`
+      const record = await createSession(blank, name)
+      resetSessionRuntime(blank)
+      setActiveSessionIdState(record.id); setActiveSessionName(record.name); setActiveSessionCreatedAt(record.createdAt)
+      setSessions(await listSessions())
+    } finally { setSessionReady(true) }
   }
   const renameSession = async (session: SessionSummary) => {
     const name = window.prompt('Đổi tên phiên', session.name)?.trim(); if (!name) return
-    const record = await loadSession(session.id); if (!record) return
-    await saveSession({ ...record, name, updatedAt: new Date().toISOString() }); await refreshSessions()
+    if (session.id === activeSessionId) setActiveSessionName(name)
+    const task = sessionSaveQueueRef.current.catch(() => undefined).then(async () => {
+      const record = await loadSession(session.id); if (!record) return
+      await saveSession({ ...record, name, updatedAt: new Date().toISOString() })
+    })
+    sessionSaveQueueRef.current = task
+    await task
+    await refreshSessions()
   }
-  const removeSession = async (id: string) => { if (window.confirm('Xoá snapshot phiên này?')) { await deleteSession(id); await refreshSessions() } }
+  const removeSession = async (id: string) => {
+    const removingActive = id === activeSessionId
+    if (!window.confirm(removingActive ? 'Xoá phiên đang mở? Bạn sẽ được chuyển sang phiên khác.' : 'Xoá phiên này?')) return
+    if (removingActive) setSessionReady(false)
+    await deleteSession(id)
+    const remaining = await listSessions()
+    if (!removingActive) { setSessions(remaining); return }
+    if (remaining.length) await activateSession(remaining[0].id, false)
+    else await newSession(false)
+  }
 
   const requireAiKey = (): string => {
     const key = getPollinationsAccessKey()
@@ -449,9 +508,8 @@ export default function App() {
 
   return <main className="app-shell">
     <header className="topbar">
-      <div className="brand"><span className="brand-mark">S</span><span>Sketchify <b>Video</b></span><small>LOCAL EDITOR</small></div>
+      <div className="brand"><span className="brand-mark">S</span><span>Sketchify <b>Video</b></span><SessionSwitcher activeSessionId={activeSessionId} activeSessionName={activeSessionName} sessions={sessions} refresh={() => void refreshSessions()} select={(id) => void activateSession(id)} create={() => void newSession()} rename={(session) => void renameSession(session)} remove={(id) => void removeSession(id)} /></div>
       <div className="top-actions">
-        <button className="quiet" onClick={() => { void refreshSessions(); setSessionsOpen(true) }}>Phiên làm việc</button>
         <button className={`ai-connect ${aiConnected ? 'connected' : ''}`} onClick={() => aiConnected ? openAiDialog() : connectPollinations()}>{aiConnected ? 'AI đã kết nối' : 'Kết nối AI'}</button>
         <button className="quiet" disabled={!active} onClick={() => void play(false)}>{isPlaying ? 'Dừng' : 'Xem thử'}</button>
         <button className="export" disabled={!active || !supported || isPlaying} onClick={() => void play(true)}>Tạo .webm</button>
@@ -502,7 +560,6 @@ export default function App() {
       connect={(appKey) => { savePollinationsAppKey(appKey); beginPollinationsAuth(appKey) }}
       disconnect={() => { disconnectPollinations(); setAiConnected(false); setAiProgress({ phase: 'script', message: 'Đã ngắt kết nối Pollinations.' }) }}
       generateImage={generateAiImage} generateStory={generateStory} retryFailure={retryAiFailure} />
-    <SessionDialog open={sessionsOpen} sessions={sessions} close={() => setSessionsOpen(false)} save={() => void saveNamedSession()} load={(id) => void openSession(id)} rename={(session) => void renameSession(session)} remove={(id) => void removeSession(id)} />
   </main>
 }
 

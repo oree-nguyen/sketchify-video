@@ -72,6 +72,10 @@ export interface Project {
   audioClips: AudioClip[]
 }
 
+export function createEmptyProject(): Project {
+  return { frames: [], activeFrameId: null, handStyle: 'pencil', playhead: { globalTimeSec: 0 }, audioClips: [] }
+}
+
 export function createFrame(file: File, id: number): Frame {
   return createFrameFromSource(file, id, 'upload')
 }

@@ -6,7 +6,8 @@ import { audioBufferToBase64, base64ToAudioBuffer, bytesToBase64 } from './audio
 const DB_NAME = 'sketchify-sessions'
 const STORE_NAME = 'sessions'
 const VERSION = 1
-export const CURRENT_SESSION_ID = '__current__'
+const LEGACY_CURRENT_ID = '__current__'
+export const ACTIVE_POINTER_ID = '__active_pointer__'
 
 export interface SerializedFrame {
   id: number
@@ -21,15 +22,71 @@ export interface SerializedFrame {
 }
 export interface SerializedProject { handStyle: HandStyleId; activeFrameId: number | null; frames: SerializedFrame[] }
 export interface SessionRecord { id: string; name: string; createdAt: string; updatedAt: string; projectJson: SerializedProject }
-export interface SessionSummary { id: string; name: string; updatedAt: string }
+export interface SessionSummary { id: string; name: string; updatedAt: string; frameCount: number }
+interface ActivePointerRecord { id: typeof ACTIVE_POINTER_ID; activeSessionId: string }
+type StoredRecord = SessionRecord | ActivePointerRecord
 
 export async function listSessions(): Promise<SessionSummary[]> {
-  const records = await request<SessionRecord[]>((await dbStore('readonly')).getAll())
-  return records.filter((record) => record.id !== CURRENT_SESSION_ID).map(({ id, name, updatedAt }) => ({ id, name, updatedAt })).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+  const records = await request<StoredRecord[]>((await dbStore('readonly')).getAll())
+  return records.filter(isSessionRecord).filter((record) => record.id !== LEGACY_CURRENT_ID)
+    .map(({ id, name, updatedAt, projectJson }) => ({ id, name, updatedAt, frameCount: projectJson.frames.length }))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
 }
-export async function loadSession(id: string): Promise<SessionRecord | undefined> { return request((await dbStore('readonly')).get(id)) }
-export async function saveSession(record: SessionRecord): Promise<void> { await request((await dbStore('readwrite')).put(record)) }
-export async function deleteSession(id: string): Promise<void> { if (id !== CURRENT_SESSION_ID) await request((await dbStore('readwrite')).delete(id)) }
+
+export async function loadSession(id: string): Promise<SessionRecord | undefined> {
+  const record = await request<StoredRecord | undefined>((await dbStore('readonly')).get(id))
+  return isSessionRecord(record) ? record : undefined
+}
+
+export async function saveSession(record: SessionRecord): Promise<void> {
+  if (isReservedId(record.id)) throw new Error('ID phiên trùng với ID hệ thống.')
+  await request((await dbStore('readwrite')).put(record))
+}
+
+export async function deleteSession(id: string): Promise<void> {
+  if (isReservedId(id)) return
+  await request((await dbStore('readwrite')).delete(id))
+  if (await getActiveSessionId() === id) await request((await dbStore('readwrite')).delete(ACTIVE_POINTER_ID))
+}
+
+export async function getActiveSessionId(): Promise<string | null> {
+  const record = await request<StoredRecord | undefined>((await dbStore('readonly')).get(ACTIVE_POINTER_ID))
+  return record && 'activeSessionId' in record ? record.activeSessionId : null
+}
+
+export async function setActiveSessionId(activeSessionId: string): Promise<void> {
+  if (isReservedId(activeSessionId)) throw new Error('Không thể mở bản ghi hệ thống như một phiên.')
+  await request((await dbStore('readwrite')).put({ id: ACTIVE_POINTER_ID, activeSessionId } satisfies ActivePointerRecord))
+}
+
+export async function createSession(project: Project, name: string): Promise<SessionRecord> {
+  const record = await makeSessionRecord(project, crypto.randomUUID(), name)
+  await saveSession(record)
+  await setActiveSessionId(record.id)
+  return record
+}
+
+export async function resolveInitialSession(emptyProject: Project): Promise<SessionRecord> {
+  const activeId = await getActiveSessionId()
+  if (activeId) {
+    const active = await loadSession(activeId)
+    if (active) return active
+  }
+  const legacy = await loadSession(LEGACY_CURRENT_ID)
+  if (legacy) {
+    const migrated = { ...legacy, id: crypto.randomUUID(), name: legacy.name === 'Phiên đang làm' ? 'Phiên được khôi phục' : legacy.name }
+    await saveSession(migrated)
+    await request((await dbStore('readwrite')).delete(LEGACY_CURRENT_ID))
+    await setActiveSessionId(migrated.id)
+    return migrated
+  }
+  const newest = (await listSessions())[0]
+  if (newest) {
+    const record = await loadSession(newest.id)
+    if (record) { await setActiveSessionId(record.id); return record }
+  }
+  return createSession(emptyProject, 'Phiên mới 1')
+}
 
 export async function serializeProject(project: Project): Promise<SerializedProject> {
   return {
@@ -49,6 +106,7 @@ export async function serializeProject(project: Project): Promise<SerializedProj
 }
 
 export async function restoreProject(serialized: SerializedProject): Promise<Project> {
+  if (!serialized.frames.length) return { frames: [], activeFrameId: null, handStyle: serialized.handStyle ?? 'pencil', playhead: { globalTimeSec: 0 }, audioClips: [] }
   const audioContext = new AudioContext()
   try {
     const frames = await Promise.all([...serialized.frames].sort((a, b) => a.order - b.order).map(async (frame) => {
@@ -66,6 +124,11 @@ export async function makeSessionRecord(project: Project, id: string, name: stri
   const now = new Date().toISOString()
   return { id, name, createdAt: createdAt ?? now, updatedAt: now, projectJson: await serializeProject(project) }
 }
+
+function isSessionRecord(record: StoredRecord | undefined): record is SessionRecord {
+  return Boolean(record && 'projectJson' in record && typeof record.name === 'string')
+}
+function isReservedId(id: string): boolean { return id === ACTIVE_POINTER_ID || id === LEGACY_CURRENT_ID }
 
 let databasePromise: Promise<IDBDatabase> | null = null
 function database(): Promise<IDBDatabase> {

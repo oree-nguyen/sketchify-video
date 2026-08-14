@@ -38,8 +38,29 @@ button:disabled { opacity: .45; }
 .topbar { height: 64px; padding: 0 22px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); background: #0d1117; }
 .brand { display: flex; align-items: center; gap: 10px; font-size: 17px; letter-spacing: -.4px; }
 .brand b { color: var(--accent-strong); }
-.brand small { font: 10px 'Oswald Sketchify', sans-serif; color: #748293; letter-spacing: 1.2px; border-left: 1px solid #34404d; padding-left: 10px; }
 .brand-mark { width: 28px; height: 28px; display: grid; place-items: center; background: var(--accent); color: var(--accent-ink); font-weight: 900; border-radius: 8px; }
+.session-switcher { position: relative; margin-left: 2px; border-left: 1px solid #34404d; padding-left: 10px; font-size: 12px; }
+.session-switcher > summary { min-width: 170px; max-width: 250px; height: 34px; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 0 10px; border: 1px solid #34414d; border-radius: 8px; background: #11171e; color: #d7e0e8; cursor: pointer; list-style: none; }
+.session-switcher > summary::-webkit-details-marker { display: none; }
+.session-switcher > summary span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-switcher > summary i { color: var(--muted); font-style: normal; transition: transform .16s ease; }
+.session-switcher[open] > summary { border-color: var(--accent); box-shadow: 0 0 14px #84cc1635; }
+.session-switcher[open] > summary i { transform: rotate(180deg); }
+.session-menu { position: absolute; z-index: 50; top: 41px; left: 10px; width: 370px; overflow: hidden; border: 1px solid #3b4854; border-radius: 11px; background: #0d1319; box-shadow: 0 20px 60px #000c, 0 0 24px #84cc1620; }
+.session-menu-heading { display: flex; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 10px; letter-spacing: .8px; text-transform: uppercase; }
+.session-menu-heading small { color: var(--accent-strong); }
+.session-menu-list { max-height: 340px; overflow-y: auto; padding: 6px; }
+.session-menu-row { display: grid; grid-template-columns: minmax(0, 1fr) 30px 30px; align-items: center; gap: 4px; border: 1px solid transparent; border-radius: 7px; }
+.session-menu-row:hover { border-color: #4b621f; background: #16200f; box-shadow: inset 0 0 18px #84cc1612; }
+.session-menu-row.active { border-color: var(--accent); background: #17230e; box-shadow: 0 0 12px #84cc162e; }
+.session-main, .session-icon, .session-new { border: 0; background: transparent; }
+.session-main { min-width: 0; padding: 8px; text-align: left; }
+.session-main span, .session-main small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-main span { color: #e4ebf1; font-size: 12px; }.session-main small { margin-top: 2px; color: var(--muted); font-size: 9px; }
+.session-icon { width: 28px; height: 28px; border-radius: 6px; color: #9caab7; }
+.session-icon:hover { background: #84cc1620; color: var(--accent-strong); }.session-icon.danger:hover { background: #68252d55; color: #ff9ca7; }
+.session-new { width: 100%; padding: 11px 13px; border-top: 1px solid var(--line); color: var(--accent-strong); text-align: left; font-weight: 700; }
+.session-new:hover { background: #1a2810; box-shadow: inset 0 0 20px #84cc161b; }
 .top-actions { display: flex; align-items: center; gap: 8px; }
 .ai-connect { padding: 8px 11px; border: 1px solid var(--line-strong); border-radius: 8px; background: transparent; color: #c2ccd5; font-size: 13px; }
 .ai-connect:hover, .ai-connect.connected { border-color: var(--accent-track); color: var(--accent-strong); box-shadow: 0 0 14px #84cc1638; }
@@ -273,14 +294,6 @@ button:disabled { opacity: .45; }
 .narration-preview { grid-column: 1 / -1; display: flex; align-items: center; gap: 9px; color: var(--accent-strong); font-size: 10px; }
 .waveform { height: 25px; flex: 1 1 auto; display: flex; align-items: center; gap: 2px; }
 .waveform i { width: 3px; border-radius: 99px; background: var(--accent); box-shadow: 0 0 5px #84cc1680; }
-.session-dialog { width: min(620px, calc(100vw - 28px)); max-height: min(680px, calc(100dvh - 28px)); padding: 0; border: 1px solid #3a4855; border-radius: 14px; background: #0d131a; color: var(--text); box-shadow: 0 28px 100px #000c, 0 0 35px #84cc1625; }
-.session-dialog::backdrop { background: #05070bd6; backdrop-filter: blur(5px); }
-.session-dialog > header { display: flex; justify-content: space-between; align-items: center; padding: 18px 20px; border-bottom: 1px solid var(--line); }
-.session-dialog h2 { margin: 3px 0 0; }.session-dialog header small { color: var(--accent-strong); letter-spacing: 1px; }
-.session-save { margin: 16px 20px 5px; }.session-list { display: grid; gap: 8px; padding: 12px 20px 20px; }
-.session-list article { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px; border: 1px solid #2e3b46; border-radius: 9px; background: #111820; }
-.session-list b, .session-list small { display: block; }.session-list small { margin-top: 3px; color: var(--muted); }.session-list nav { display: flex; gap: 5px; }
-.session-list button { padding: 6px 8px; border: 1px solid #3a4a56; border-radius: 6px; background: #0d141a; color: #d5dee5; }.session-list button:hover { border-color: var(--accent); color: var(--accent-strong); }.session-list button.danger { border-color: #63343a; color: #f3a6ae; }
 
 .quiet:focus-visible, .export:focus-visible, .play:focus-visible, .pollinations-connect:focus-visible, .range-input:focus-visible, summary:focus-visible, .select-options button:focus-visible, .object-row:focus-within, .check-row:focus-within, .toggle-row:focus-within { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
 ::-webkit-scrollbar { width: 9px; height: 9px; }
@@ -311,6 +324,12 @@ button:disabled { opacity: .45; }
   .ai-choice-grid { grid-template-columns: 1fr; }
   .narration-bar { grid-template-columns: 1fr; }
   .narration-preview { grid-column: 1; }
+}
+
+@media (max-width: 520px) {
+  .brand > span:nth-child(2) { display: none; }
+  .session-switcher > summary { min-width: 135px; max-width: 155px; }
+  .session-menu { position: fixed; top: 58px; left: 8px; width: calc(100vw - 16px); }
 }
 
 @media (prefers-reduced-motion: reduce) {
