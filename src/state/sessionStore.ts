@@ -1,5 +1,5 @@
 import type { FrameSettings } from './settingsDefaults'
-import type { HandStyleId, Project, TransitionType } from './projectStore'
+import { DEFAULT_SUBTITLE_SETTINGS, type HandStyleId, type Project, type SubtitleSettings, type TransitionType } from './projectStore'
 import { DEFAULT_SETTINGS } from './settingsDefaults'
 import { audioBufferToBase64, base64ToAudioBuffer, bytesToBase64 } from './audioSerialization'
 
@@ -20,7 +20,7 @@ export interface SerializedFrame {
   transitionToNext: { type: TransitionType; durationSec: number }
   narration?: { text: string; voiceId: string; audioBase64: string; generatedAt: string }
 }
-export interface SerializedProject { handStyle: HandStyleId; activeFrameId: number | null; frames: SerializedFrame[] }
+export interface SerializedProject { handStyle: HandStyleId; activeFrameId: number | null; frames: SerializedFrame[]; subtitle?: SubtitleSettings }
 export interface SessionRecord { id: string; name: string; createdAt: string; updatedAt: string; projectJson: SerializedProject }
 export interface SessionSummary { id: string; name: string; updatedAt: string; frameCount: number }
 interface ActivePointerRecord { id: typeof ACTIVE_POINTER_ID; activeSessionId: string }
@@ -92,6 +92,7 @@ export async function serializeProject(project: Project): Promise<SerializedProj
   return {
     handStyle: project.handStyle,
     activeFrameId: project.activeFrameId,
+    subtitle: structuredClone(project.subtitle),
     frames: await Promise.all(project.frames.map(async (frame, order) => {
       const response = await fetch(frame.sourceUrl)
       const blob = await response.blob()
@@ -106,7 +107,8 @@ export async function serializeProject(project: Project): Promise<SerializedProj
 }
 
 export async function restoreProject(serialized: SerializedProject): Promise<Project> {
-  if (!serialized.frames.length) return { frames: [], activeFrameId: null, handStyle: serialized.handStyle ?? 'pencil', playhead: { globalTimeSec: 0 }, audioClips: [] }
+  const subtitle = { ...structuredClone(DEFAULT_SUBTITLE_SETTINGS), ...serialized.subtitle }
+  if (!serialized.frames.length) return { frames: [], activeFrameId: null, handStyle: serialized.handStyle ?? 'pencil', playhead: { globalTimeSec: 0 }, audioClips: [], subtitle }
   const audioContext = new AudioContext()
   try {
     const frames = await Promise.all([...serialized.frames].sort((a, b) => a.order - b.order).map(async (frame) => {
@@ -116,7 +118,7 @@ export async function restoreProject(serialized: SerializedProject): Promise<Pro
       const settings = { ...structuredClone(DEFAULT_SETTINGS), ...frame.settings, camera: { ...DEFAULT_SETTINGS.camera, ...frame.settings.camera }, pageZoom: { ...DEFAULT_SETTINGS.pageZoom, ...frame.settings.pageZoom }, cameraPinned: frame.settings.cameraPinned ?? false }
       return { id: frame.id, name: frame.name, sourceUrl, settings, objects: [], transitionToNext: frame.transitionToNext, durationSec: settings.holdDurationSec, analysis: null, dirty: true, imageSource: frame.imageSource, narration }
     }))
-    return { frames, activeFrameId: frames.some((frame) => frame.id === serialized.activeFrameId) ? serialized.activeFrameId : frames[0]?.id ?? null, handStyle: serialized.handStyle, playhead: { globalTimeSec: 0 }, audioClips: [] }
+    return { frames, activeFrameId: frames.some((frame) => frame.id === serialized.activeFrameId) ? serialized.activeFrameId : frames[0]?.id ?? null, handStyle: serialized.handStyle, playhead: { globalTimeSec: 0 }, audioClips: [], subtitle }
   } finally { await audioContext.close() }
 }
 

@@ -64,16 +64,41 @@ export interface AudioClip {
   source: 'upload' | 'ai-generated'
 }
 
+export interface SubtitleSettings {
+  enabled: boolean
+  xPct: number
+  yPct: number
+  fontFamily: string
+  fontSizePx: number
+  color: string
+  bold: boolean
+  italic: boolean
+  underline: boolean
+}
+
+export const DEFAULT_SUBTITLE_SETTINGS: SubtitleSettings = {
+  enabled: false,
+  xPct: 0.5,
+  yPct: 0.88,
+  fontFamily: 'Oswald Sketchify',
+  fontSizePx: 38,
+  color: '#ffffff',
+  bold: true,
+  italic: false,
+  underline: false,
+}
+
 export interface Project {
   frames: Frame[]
   activeFrameId: number | null
   handStyle: HandStyleId
   playhead: { globalTimeSec: number }
   audioClips: AudioClip[]
+  subtitle: SubtitleSettings
 }
 
 export function createEmptyProject(): Project {
-  return { frames: [], activeFrameId: null, handStyle: 'pencil', playhead: { globalTimeSec: 0 }, audioClips: [] }
+  return { frames: [], activeFrameId: null, handStyle: 'pencil', playhead: { globalTimeSec: 0 }, audioClips: [], subtitle: structuredClone(DEFAULT_SUBTITLE_SETTINGS) }
 }
 
 export function createFrame(file: File, id: number): Frame {

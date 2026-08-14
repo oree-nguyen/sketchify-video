@@ -3,6 +3,8 @@ import { analysisPauseDurationSec, frameDrawDurationSec, retimeAnalysisForFrame,
 import { buildProjectTimeline } from '../timeline/projectTimeline'
 import type { Analysis } from '../wasm/wasmClient'
 import { Player } from './Player'
+import { buildSubtitleCues } from '../subtitles/subtitleTimeline'
+import { drawSubtitleOverlay } from './subtitleRenderer'
 
 export interface ProjectPlayResult {
   elapsedMs: number
@@ -35,6 +37,13 @@ export class ProjectPlayer {
     const startFrameIndex = Math.max(0, this.project.frames.findIndex((frame) => frame.id === requestedStartId))
     const firstSegment = timeline.segments[startFrameIndex] ?? timeline.segments[0]
     const audio = await ProjectAudioSession.create(this.project, record, firstSegment.startSec)
+    const firstAnalysis = this.analyses[this.project.frames[firstSegment.frameIndex].id]
+    if (record && firstAnalysis) {
+      this.canvas.width = firstAnalysis.img.w
+      this.canvas.height = firstAnalysis.img.h
+      const context = this.canvas.getContext('2d', { willReadFrequently: true })
+      if (context) { context.fillStyle = `rgb(${firstAnalysis.img.bg.join(',')})`; context.fillRect(0, 0, this.canvas.width, this.canvas.height) }
+    }
     const recorder = record ? makeRecorder(this.canvas, this.project.frames[0].settings.fps, audio?.captureStream) : undefined
     const chunks: BlobPart[] = []
     if (record && !recorder) throw new Error('Trình duyệt không hỗ trợ MediaRecorder')
@@ -60,6 +69,9 @@ export class ProjectPlayer {
       const drawDuration = Math.min(naturalDrawDuration, Math.max(0.001, playableDuration - pauseDuration))
       const holdDuration = Math.max(0, playableDuration - drawDuration - pauseDuration)
       const globalStart = segment.startSec + previousHalf
+      const subtitleCues = frame.narration?.audioBuffer
+        ? buildSubtitleCues(frame.narration.text, frame.narration.audioBuffer.duration)
+        : []
 
       const player = new Player(this.canvas, {
         sourceUrl: frame.sourceUrl,
@@ -71,6 +83,7 @@ export class ProjectPlayer {
         settings: { ...frame.settings, holdDurationSec: holdDuration },
         zoomBlockIds: frame.objects.filter((object) => object.settings.zoomFollow).map((object) => object.blockId),
         objectSettingsByBlockId: Object.fromEntries(frame.objects.map((object) => [object.blockId, object.settings])),
+        subtitle: { settings: this.project.subtitle, track: { cues: subtitleCues, timeOffsetSec: previousHalf } },
         onCanvasReady: this.onCanvasReady,
       })
       this.currentPlayer = player
@@ -87,6 +100,8 @@ export class ProjectPlayer {
           segment.transitionEndSec,
           onProgress,
           () => this.stopped,
+          this.project,
+          timeline,
         )
       }
     }
@@ -126,6 +141,8 @@ async function renderTransition(
   endSec: number,
   onProgress: ((globalTimeSec: number) => void) | undefined,
   isStopped: () => boolean,
+  project: Project,
+  timeline: ReturnType<typeof buildProjectTimeline>,
 ): Promise<void> {
   const context = canvas.getContext('2d', { willReadFrequently: true })
   if (!context) throw new Error('Không tạo được Canvas2D cho transition')
@@ -142,11 +159,23 @@ async function renderTransition(
       const progress = Math.min(1, (now - startedAt) / durationMs)
       onProgress?.(startSec + progress * (endSec - startSec))
       drawTransitionFrame(context, canvas, snapshot, nextImage, current.transitionToNext.type, progress)
+      drawProjectSubtitleAt(context, project, timeline, startSec + progress * (endSec - startSec))
       if (!isStopped() && progress < 1) requestAnimationFrame(tick)
       else resolve()
     }
     requestAnimationFrame(tick)
   })
+}
+
+function drawProjectSubtitleAt(context: CanvasRenderingContext2D, project: Project, timeline: ReturnType<typeof buildProjectTimeline>, globalTimeSec: number): void {
+  if (!project.subtitle.enabled) return
+  const segment = [...timeline.segments].reverse().find((candidate) => globalTimeSec >= candidate.startSec)
+  if (!segment) return
+  const frame = project.frames[segment.frameIndex]
+  const narration = frame.narration
+  if (!narration?.audioBuffer) return
+  const cues = buildSubtitleCues(narration.text, narration.audioBuffer.duration)
+  drawSubtitleOverlay(context, project.subtitle, { cues }, globalTimeSec - segment.startSec)
 }
 
 function drawTransitionFrame(

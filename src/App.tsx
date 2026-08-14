@@ -5,11 +5,12 @@ import { FramePanel } from './components/FrameTimeline'
 import { AIGenerationDialog } from './components/AIGenerationDialog'
 import { NarrationBar } from './components/NarrationBar'
 import { SessionSwitcher } from './components/SessionSwitcher'
+import { SubtitlePanel } from './components/SubtitlePanel'
 import { beginPollinationsAuth, consumeAuthCallbackResult, disconnectPollinations, getPollinationsAccessKey, getPollinationsAppKey, getPollinationsRedirectUri, savePollinationsAppKey } from './ai/pollinationsAuth'
 import { generateImage as pollinationsGenerateImage, generateSpeech, generateStoryScript } from './ai/pollinationsClient'
 import type { StoryProgress, StoryScene, StorySceneFailure } from './ai/types'
 import { ProjectPlayer } from './render/ProjectPlayer'
-import { createEmptyProject, createFrame, createFrameFromSource, frameDrawDurationSec, mergeFrameObjects, objectDropInsertionIndex, reconcileFrameObjects, setFrameCamera, setFrameCameraPinned, setFrameHold, setFramePageZoom, setFramePauseSettings, setFrameTransition, setObjectDuration, setObjectEffect, setObjectOrder, setObjectPush, setObjectZoomFollow, syncFrameDuration, type AudioClip, type Frame, type ObjectSettings, type Project } from './state/projectStore'
+import { createEmptyProject, createFrame, createFrameFromSource, frameDrawDurationSec, mergeFrameObjects, objectDropInsertionIndex, reconcileFrameObjects, setFrameCamera, setFrameCameraPinned, setFrameHold, setFramePageZoom, setFramePauseSettings, setFrameTransition, setObjectDuration, setObjectEffect, setObjectOrder, setObjectPush, setObjectZoomFollow, syncFrameDuration, type AudioClip, type Frame, type ObjectSettings, type Project, type SubtitleSettings } from './state/projectStore'
 import type { FrameSettings } from './state/settingsDefaults'
 import { buildProjectTimeline } from './timeline/projectTimeline'
 import { analyzeImage, type Analysis } from './wasm/wasmClient'
@@ -21,7 +22,7 @@ export default function App() {
   const [analyses, setAnalyses] = useState<Record<number, Analysis>>({})
   const [analysisStatus, setAnalysisStatus] = useState<'idle' | 'working' | 'error'>('idle')
   const [isPlaying, setIsPlaying] = useState(false)
-  const [panel, setPanel] = useState<'hand' | 'edit'>('hand')
+  const [panel, setPanel] = useState<'hand' | 'edit' | 'subtitle'>('hand')
   const [editScope, setEditScope] = useState<'object' | 'frame'>('object')
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null)
   const [selectedObjectIds, setSelectedObjectIds] = useState<string[]>([])
@@ -102,7 +103,7 @@ export default function App() {
       catch (error) { console.error('[Sketchify] Tự động lưu thất bại', error) }
     })(), 2000)
     return () => window.clearTimeout(timeout)
-  }, [sessionReady, activeSessionId, activeSessionName, activeSessionCreatedAt, project.frames, project.activeFrameId, project.handStyle, project.audioClips])
+  }, [sessionReady, activeSessionId, activeSessionName, activeSessionCreatedAt, project.frames, project.activeFrameId, project.handStyle, project.audioClips, project.subtitle])
 
   const inspect = async (frameId: number, url: string, settings: FrameSettings): Promise<Analysis | null> => {
     setAnalysisStatus('working')
@@ -506,6 +507,27 @@ export default function App() {
     event.currentTarget.style.setProperty('--spot-y', `${event.clientY - bounds.top}px`)
   }
 
+  const updateSubtitle = (patch: Partial<SubtitleSettings>) => setProject((current) => ({ ...current, subtitle: { ...current.subtitle, ...patch } }))
+  const dragSubtitleSample = (event: PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    const sample = event.currentTarget
+    const surface = sample.parentElement
+    if (!surface) return
+    sample.setPointerCapture(event.pointerId)
+    const move = (pointer: globalThis.PointerEvent) => {
+      const bounds = surface.getBoundingClientRect()
+      updateSubtitle({
+        xPct: Math.max(.1, Math.min(.9, (pointer.clientX - bounds.left) / bounds.width)),
+        yPct: Math.max(.08, Math.min(.94, (pointer.clientY - bounds.top) / bounds.height)),
+      })
+    }
+    const finish = () => { sample.removeEventListener('pointermove', move); sample.removeEventListener('pointerup', finish); sample.removeEventListener('pointercancel', finish) }
+    sample.addEventListener('pointermove', move)
+    sample.addEventListener('pointerup', finish)
+    sample.addEventListener('pointercancel', finish)
+    move(event.nativeEvent)
+  }
+
   return <main className="app-shell">
     <header className="topbar">
       <div className="brand"><span className="brand-mark">S</span><span>Sketchify <b>Video</b></span><SessionSwitcher activeSessionId={activeSessionId} activeSessionName={activeSessionName} sessions={sessions} refresh={() => void refreshSessions()} select={(id) => void activateSession(id)} create={() => void newSession()} rename={(session) => void renameSession(session)} remove={(id) => void removeSession(id)} /></div>
@@ -538,17 +560,20 @@ export default function App() {
                 }
               }} style={{ left: `${block.bbox.x / analysis.img.w * 100}%`, top: `${block.bbox.y / analysis.img.h * 100}%`, width: `${block.bbox.w / analysis.img.w * 100}%`, height: `${block.bbox.h / analysis.img.h * 100}%` }}><b>{object ? object.settings.order + 1 : block.id + 1}</b></button>
             })}</div>}
+            {panel === 'subtitle' && !isPlaying && <button type="button" className="subtitle-position-sample" aria-label="Kéo vị trí phụ đề" onPointerDown={dragSubtitleSample} style={{ left: `${project.subtitle.xPct * 100}%`, top: `${project.subtitle.yPct * 100}%`, color: project.subtitle.color, fontFamily: project.subtitle.fontFamily, fontSize: `${Math.max(16, project.subtitle.fontSizePx * .62)}px`, fontWeight: project.subtitle.bold ? 700 : 400, fontStyle: project.subtitle.italic ? 'italic' : 'normal', textDecoration: project.subtitle.underline ? 'underline' : 'none' }}>Đây là tiêu đề mẫu</button>}
           </div>}
           {!active && <canvas ref={canvasRef} className="render-canvas" aria-label="Canvas xem thử" />}
           {!active && <div className="empty-preview"><strong>Biến ảnh thành câu chuyện được vẽ</strong><p>Tải ảnh của bạn hoặc để AI tạo trọn storyboard tiếng Việt.</p><div className="empty-actions"><button className="export" onClick={() => fileRef.current?.click()}>Tải ảnh lên</button><button className="quiet" onClick={() => openAiDialog()}>Tạo video từ chủ đề…</button></div></div>}
         </div>
-        <div className="transport"><button disabled={isPlaying} onClick={() => setProgress(Math.max(0, progress - 10))}>−10</button><button className="play" disabled={!active} onClick={() => void play(false)}>{isPlaying ? 'Ⅱ' : '▶'}</button><button disabled={isPlaying} onClick={() => setProgress(Math.min(total, progress + 10))}>+10</button><span className="duration">{formatTime(progress)} / {formatTime(total)}</span></div>
+        <div className="transport"><div className="transport-left"><button className={`cc-toggle ${project.subtitle.enabled ? 'active' : ''}`} aria-label="Bật tắt phụ đề" aria-pressed={project.subtitle.enabled} onClick={() => updateSubtitle({ enabled: !project.subtitle.enabled })}>CC</button></div><div className="transport-center"><button disabled={isPlaying} onClick={() => setProgress(Math.max(0, progress - 10))}>−10</button><button className="play" disabled={!active} onClick={() => void play(false)}>{isPlaying ? 'Ⅱ' : '▶'}</button><button disabled={isPlaying} onClick={() => setProgress(Math.min(total, progress + 10))}>+10</button></div><span className="duration">{formatTime(progress)} / {formatTime(total)}</span></div>
         <input aria-label="Playhead" className="scrubber range-input" type="range" min="0" max={Math.max(total, 1)} step=".1" value={Math.min(progress, total)} style={{ '--range-progress': `${rangeProgress}%` } as CSSProperties} onChange={(event) => setProgress(Number(event.target.value))} />
         {active && <NarrationBar frame={active} busy={piperBusy} progress={piperProgress} create={(text, voiceId) => void createPiperNarration(text, voiceId)} />}
       </section>
       <aside className="inspector spotlight-surface" onPointerMove={handleSpotlight}>
-        <nav className="tool-rail"><button className={panel === 'hand' ? 'active' : ''} onClick={() => setPanel('hand')} aria-label="Bàn tay" title="Bàn tay">✎</button>{active && <button className={panel === 'edit' ? 'active' : ''} onClick={() => setPanel('edit')} aria-label="Chỉnh sửa" title="Chỉnh sửa">☷</button>}</nav>
-        <div className="inspector-body">{panel === 'hand' || !active
+        <nav className="tool-rail"><button className={panel === 'hand' ? 'active' : ''} onClick={() => setPanel('hand')} aria-label="Bàn tay" title="Bàn tay">✎</button>{active && <button className={panel === 'edit' ? 'active' : ''} onClick={() => setPanel('edit')} aria-label="Chỉnh sửa" title="Chỉnh sửa">☷</button>}<button className={panel === 'subtitle' ? 'active' : ''} onClick={() => setPanel('subtitle')} aria-label="Phụ đề" title="Phụ đề">CC</button></nav>
+        <div className="inspector-body">{panel === 'subtitle'
+          ? <SubtitlePanel settings={project.subtitle} update={updateSubtitle} />
+          : panel === 'hand' || !active
           ? <HandPanel style={project.handStyle} setStyle={(handStyle) => setProject((current) => ({ ...current, handStyle }))} />
           : <EditPanel frame={active} analysis={analysis} last={project.frames.at(-1)?.id === active.id} scope={editScope} setScope={setEditScope} selectedObjectId={selectedObjectId} selectedObjectIds={selectedObjectIds} selectObject={selectOnlyObject} toggleObjectSelection={toggleObjectSelection} groupSelectedObjects={groupSelectedObjects} updateFrameSettings={updateFrameSettings} updateTransition={updateTransition} updateObject={updateObject} reorderObject={reorderObject} audioClip={project.audioClips.find((clip) => clip.frameId === active.id)} removeAudio={removeActiveAudio} removeFrame={removeActiveFrame} />}
         </div>

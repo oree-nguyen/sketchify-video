@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_SETTINGS } from './settingsDefaults'
-import { frameDrawDurationSec, frameDurationSec, mergeFrameObjects, objectDropInsertionIndex, reconcileFrameObjects, reorderFrameObjects, retimeAnalysisForFrame, setFrameCameraPinned, setObjectOrder, setObjectZoomFollow, updateObjectSettings, type Frame, type Project } from './projectStore'
+import { DEFAULT_SUBTITLE_SETTINGS, frameDrawDurationSec, frameDurationSec, mergeFrameObjects, objectDropInsertionIndex, reconcileFrameObjects, reorderFrameObjects, retimeAnalysisForFrame, setFrameCameraPinned, setObjectOrder, setObjectZoomFollow, updateObjectSettings, type Frame, type Project } from './projectStore'
 import type { Analysis, Block } from '../wasm/wasmClient'
 
 const block = (id: number, x: number): Block => ({
@@ -24,7 +24,7 @@ const makeFrame = (id: number, blocks: Block[]): Frame => ({
 describe('FrameObject contract', () => {
   it('store chặn xung đột Ghim camera và Zoom theo vật thể ở cả hai chiều', () => {
     const frame = makeFrame(99, [block(1, 0)])
-    let project: Project = { frames: [frame], activeFrameId: frame.id, handStyle: 'pencil', playhead: { globalTimeSec: 0 }, audioClips: [] }
+    let project: Project = { frames: [frame], activeFrameId: frame.id, handStyle: 'pencil', playhead: { globalTimeSec: 0 }, audioClips: [], subtitle: structuredClone(DEFAULT_SUBTITLE_SETTINGS) }
     expect(setFrameCameraPinned(project, frame.id, true)).toBe(project)
     project = setObjectZoomFollow(project, frame.id, frame.objects[0].objectId, false)
     project = setFrameCameraPinned(project, frame.id, true)
@@ -68,7 +68,7 @@ describe('FrameObject contract', () => {
     expect(objectDropInsertionIndex(frame.objects, first.objectId, third.objectId, 'after')).toBe(2)
     expect(objectDropInsertionIndex(frame.objects, fourth.objectId, second.objectId, 'before')).toBe(1)
     expect(objectDropInsertionIndex(frame.objects, fourth.objectId, second.objectId, 'after')).toBe(2)
-    const project: Project = { frames: [frame], activeFrameId: frame.id, handStyle: 'pencil', playhead: { globalTimeSec: 0 }, audioClips: [] }
+    const project: Project = { frames: [frame], activeFrameId: frame.id, handStyle: 'pencil', playhead: { globalTimeSec: 0 }, audioClips: [], subtitle: structuredClone(DEFAULT_SUBTITLE_SETTINGS) }
     const insertion = objectDropInsertionIndex(frame.objects, first.objectId, third.objectId, 'after')!
     const moved = setObjectOrder(project, frame.id, first.objectId, insertion).frames[0]
     expect(moved.objects.map((object) => object.blockId)).toEqual([20, 30, 10, 40])

@@ -4,10 +4,12 @@ import type { ObjectSettings } from '../state/projectStore'
 import { buildCameraTimeline, cameraAt, cameraFocusBlockAt } from '../camera/cameraTimeline'
 import { resolvePushHand } from '../assets/hands/pushRegistry'
 import { activeScheduledUnit, buildDrawUnitSchedule, drawingProgressAt } from '../timeline/drawUnitSchedule'
+import type { SubtitleSettings } from '../state/projectStore'
+import { drawSubtitleOverlay, type SubtitleTrack } from './subtitleRenderer'
 
 export interface PlayerOptions {
   sourceUrl: string; drawDurationSec: number; holdDurationSec: number; fps: number
-  analysis: AnalysisResult; hand: { src: string; anchorPct: { x: number; y: number } };settings?:FrameSettings;zoomBlockIds?:number[];objectSettingsByBlockId?:Readonly<Record<number,ObjectSettings>>;onCanvasReady?:()=>void
+  analysis: AnalysisResult; hand: { src: string; anchorPct: { x: number; y: number } };settings?:FrameSettings;zoomBlockIds?:number[];objectSettingsByBlockId?:Readonly<Record<number,ObjectSettings>>;subtitle?:{settings:SubtitleSettings;track:SubtitleTrack};onCanvasReady?:()=>void
 }
 export interface PlayResult { elapsedMs: number; blob?: Blob }
 export const usesStandardReveal = (settings: ObjectSettings | undefined) => !settings?.pushEntry.enabled
@@ -24,7 +26,12 @@ export class Player {
     const {img,units}=this.options.analysis,w=img.w,h=img.h
     const camera=this.options.settings?buildCameraTimeline(this.options.settings,this.options.analysis.blocks,units,w,h,this.options.zoomBlockIds,this.options.drawDurationSec):null
     const blockTiles=new Map<number,HTMLCanvasElement>()
-    this.displayCanvas.width=w;this.displayCanvas.height=h
+    // Keep the captureStream track alive when ProjectPlayer already prepared
+    // the output size before MediaRecorder.start(). Reassigning width/height,
+    // even to the same value, resets the canvas backing store and can produce
+    // an empty WebM in Chromium.
+    if(this.displayCanvas.width!==w)this.displayCanvas.width=w
+    if(this.displayCanvas.height!==h)this.displayCanvas.height=h
     const display=this.displayCanvas.getContext('2d',{willReadFrequently:true})!;const content=document.createElement('canvas');content.width=w;content.height=h;const ctx=content.getContext('2d',{willReadFrequently:true})!
     ctx.fillStyle=`rgb(${img.bg.join(',')})`;ctx.fillRect(0,0,w,h)
     // Resize canvas xoá buffer. Vẽ lại source trong cùng task trước khi cho React
@@ -83,6 +90,9 @@ export class Player {
         if(debugUnit&&!debugPixelLogged&&unitCursor>debugUnitIndex&&progress>=Math.min(1,debugUnit.t1+.02)&&debugUnit.pixels.length){const pixelIndex=debugUnit.pixels[Math.floor(debugUnit.pixels.length/2)],x=pixelIndex%w,y=Math.floor(pixelIndex/w),sourceOffset=pixelIndex*4;const contentRGBA=Array.from(ctx.getImageData(x,y,1,1).data),displayRGBA=Array.from(display.getImageData(x,y,1,1).data),sourceRGBA=Array.from(img.rgba.slice(sourceOffset,sourceOffset+4));console.log('[Sketchify] completed unit pixel persistence',{unitIndex:debugUnitIndex,progress,point:{x,y},sourceRGBA,contentRGBA,displayRGBA,contentAlpha:contentRGBA[3],displayAlpha:displayRGBA[3]});debugPixelLogged=true}
         if(active){const raw=unitPosition(active,progress),pos={x:(raw.x-crop.x)*w/crop.w,y:(raw.y-crop.y)*h/crop.h};if(lastHand){const target=Math.atan2(pos.y-lastHand.y,pos.x-lastHand.x);angle+=(target-angle)*.25}drawHand(display,handImage,this.options.hand.anchorPct,pos.x,pos.y,angle,w);lastHand=pos}
         else if(this.options.settings?.handPushEnding.enabled&&lastHand&&this.options.holdDurationSec>=1.2&&elapsed>=drawMs&&elapsed<drawMs+Math.min(.8,this.options.holdDurationSec)){drawHand(display,handImage,this.options.hand.anchorPct,lastHand.x,lastHand.y,angle,w)}
+        // Final display-space layer: it is deliberately drawn after camera crop,
+        // object push and hand compositing so zoom/pan can never move subtitles.
+        if(this.options.subtitle)drawSubtitleOverlay(display,this.options.subtitle.settings,this.options.subtitle.track,elapsed/1000)
         previousProgress=progress
         if(!this.stopped&&elapsed<totalMs){requestAnimationFrame(frame);return}
         if(!recorder){resolve({elapsedMs:elapsed});return}

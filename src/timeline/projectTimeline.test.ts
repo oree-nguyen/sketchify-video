@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_SETTINGS } from '../state/settingsDefaults'
-import { setFrameCamera, setFrameHold, setFrameTransition, type Frame, type FrameObject, type Project, type TransitionType } from '../state/projectStore'
+import { DEFAULT_SUBTITLE_SETTINGS, setFrameCamera, setFrameHold, setFrameTransition, type Frame, type FrameObject, type Project, type TransitionType } from '../state/projectStore'
 import { buildProjectTimeline, projectTimeAt } from './projectTimeline'
 
 function frame(id: number, transition: TransitionType = 'none', transitionDuration = 1): Frame {
@@ -25,7 +25,7 @@ function frame(id: number, transition: TransitionType = 'none', transitionDurati
   }
 }
 
-const project = (frames: Frame[]): Project => ({ frames, activeFrameId: frames[0]?.id ?? null, handStyle: 'pencil', playhead: { globalTimeSec: 0 }, audioClips: [] })
+const project = (frames: Frame[]): Project => ({ frames, activeFrameId: frames[0]?.id ?? null, handStyle: 'pencil', playhead: { globalTimeSec: 0 }, audioClips: [], subtitle: structuredClone(DEFAULT_SUBTITLE_SETTINGS) })
 
 describe('buildProjectTimeline §11.6', () => {
   it('hai Frame 10 giây chạy liên tục trên trục 0→20 giây', () => {
