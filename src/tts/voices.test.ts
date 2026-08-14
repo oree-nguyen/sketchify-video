@@ -14,4 +14,13 @@ describe('TTS voice registry', () => {
     }
     expect(new Set(TTS_VOICES.map((voice) => voice.engine))).toEqual(new Set(['piper', 'matcha']))
   })
+
+  it('registers all three verified Vietnamese checkpoints', () => {
+    const vietnamese = TTS_VOICES.filter((voice) => voice.language === 'vi')
+    expect(vietnamese.map((voice) => voice.sourceCheckpoint)).toEqual([
+      'vi_VN-vais1000-medium',
+      'vi_VN-vivos-x_low',
+      'vi_VN-25hours_single-low',
+    ])
+  })
 })

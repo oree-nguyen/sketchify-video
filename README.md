@@ -40,7 +40,7 @@ Luồng BYOP dùng fragment redirect legacy mà Pollinations vẫn hỗ trợ ch
 
 ## Lồng tiếng trong trình duyệt và phiên làm việc
 
-TTS chạy trực tiếp trong một Web Worker riêng. Người dùng chỉ chọn ngôn ngữ và tên giọng; bộ định tuyến nội bộ tự chọn pipeline phù hợp. Giọng Việt và giọng kiểm thử tiếng Anh được tải lazy từ `public/voices/`; ONNX Runtime, phonemizer và từ điển phát âm được phục vụ cùng origin, nên không gọi dịch vụ TTS trả phí. Dữ liệu dự án được tự động lưu vào IndexedDB sau khoảng 2 giây và có thể tạo/mở/đổi tên/xoá snapshot trong menu **Phiên làm việc**. Session chỉ lưu ảnh, settings và audio WAV dạng base64; dữ liệu phân tích được tính lại khi khôi phục.
+TTS chạy trực tiếp trong một Web Worker riêng. Người dùng chỉ chọn ngôn ngữ và tên giọng; bộ định tuyến nội bộ tự chọn pipeline phù hợp. Ba checkpoint Piper tiếng Việt và checkpoint Matcha LJSpeech tiếng Anh đã kiểm thử web được tải lazy từ `public/voices/`; ONNX Runtime, phonemizer và từ điển phát âm được phục vụ cùng origin, nên không gọi dịch vụ TTS trả phí. Dữ liệu dự án được tự động lưu vào IndexedDB sau khoảng 2 giây và có thể tạo/mở/đổi tên/xoá snapshot trong menu **Phiên làm việc**. Session chỉ lưu ảnh, settings và audio WAV dạng base64; dữ liệu phân tích được tính lại khi khôi phục.
 
 Kiểm tra model tiếng Anh qua runtime web thật:
 

@@ -2,9 +2,9 @@
 
 ## Piper web runtime
 
-- `@mintplex-labs/piper-tts-web` 1.0.3, MIT License.
 - `onnxruntime-web` 1.18.0, MIT License.
 - Piper phonemizer WebAssembly assets from `@diffusionstudio/piper-wasm` 1.0.0, served locally from `public/piper/`.
+- Piper phonemizer browser glue is derived from `piper-wasm` 0.1.4 (MIT), served locally from `public/piper/`.
 
 ## Vietnamese voice
 
@@ -18,6 +18,7 @@ The voice model and configuration are distributed from `public/voices/` and fetc
 ## Additional speech voices
 
 - Official Piper voice checkpoints are fetched lazily from `rhasspy/piper-voices` and retain their published model-card licenses.
+- Registered Vietnamese checkpoints: `vi_VN-vais1000-medium`, `vi_VN-vivos-x_low`, and `vi_VN-25hours_single-low`.
 - The English LJSpeech browser-check voice uses Akjava's community Matcha-TTS ONNX quantization (`ljspeech_sim_q8.onnx`, Apache-2.0 repository). The original Matcha-TTS implementation is MIT licensed.
 - The pronunciation dictionary in `public/tts/cmudict-0.7b` is the Carnegie Mellon Pronouncing Dictionary and retains its permissive CMU notice.
 - Matcha-TTS-VIVOS is intentionally not registered because the referenced public checkpoint no longer exists. VieNeu-TTS and Kani-TTS-Vie are not Matcha checkpoints; the ngngngan checkpoint is excluded because its published terms are non-commercial.

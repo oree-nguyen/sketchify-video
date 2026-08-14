@@ -45,10 +45,19 @@ const result = await evaluate(`(async () => {
   const transfer = new DataTransfer()
   transfer.items.add(new File([blob], 'tts-overlay-test.png', { type: 'image/png' }))
   const input = document.querySelector('input[type=file]')
+  const frameCount = document.querySelectorAll('.frame-card').length
   input.files = transfer.files
   input.dispatchEvent(new Event('change', { bubbles: true }))
+  await waitFor(() => document.querySelectorAll('.frame-card').length > frameCount, 3000, 'Frame test mới chưa được tạo')
+  await waitFor(() => !document.querySelector('.narration-preview'), 3000, 'Frame test mới chưa trở thành frame hiện tại')
   await waitFor(() => document.querySelector('.narration-bar') && document.querySelectorAll('.block-overlay .block').length > 0, 30000, 'Không có kết quả phân tích/overlay')
 
+  const scrubber = document.querySelector('input[aria-label="Playhead"]')
+  const rangeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
+  rangeSetter.call(scrubber, '0')
+  scrubber.dispatchEvent(new Event('input', { bubbles: true }))
+  scrubber.dispatchEvent(new Event('change', { bubbles: true }))
+  await wait(50)
   document.querySelector('.play').click()
   await waitFor(() => document.querySelector('.preview')?.classList.contains('is-playing'), 3000, 'Preview không bắt đầu')
   await wait(300)
@@ -61,6 +70,11 @@ const result = await evaluate(`(async () => {
     opacity: overlayStyle.opacity,
     zIndex: overlayStyle.zIndex,
   }
+  ;[...document.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Dừng')?.click()
+  await waitFor(() => !document.querySelector('.preview')?.classList.contains('is-playing'), 30000, 'Không dừng được preview sau khi kiểm tra overlay')
+  const cards = document.querySelectorAll('.frame-card')
+  cards[cards.length - 1].click()
+  await waitFor(() => !document.querySelector('.narration-preview'), 3000, 'Không quay lại được frame test sạch')
 
   const language = document.querySelector('select[aria-label="Ngôn ngữ giọng đọc"]')
   const selectSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
@@ -70,6 +84,8 @@ const result = await evaluate(`(async () => {
   const voice = document.querySelector('select[aria-label="Giọng đọc"]')
   const visibleVoice = voice.selectedOptions[0]?.textContent ?? ''
   const textarea = document.querySelector('.narration-bar textarea')
+  const previousPreview = document.querySelector('.narration-preview')
+  if (previousPreview) throw new Error('Frame test mới không được chứa audio cũ')
   const textSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set
   textSetter.call(textarea, 'Hello world.')
   textarea.dispatchEvent(new Event('input', { bubbles: true }))
@@ -82,7 +98,8 @@ const result = await evaluate(`(async () => {
     if (label && states.at(-1) !== label) states.push(label)
   }, 100)
   button.click()
-  await waitFor(() => document.querySelector('.narration-preview') || window.__ttsAlerts.length, 180000, 'Tạo audio quá thời gian')
+  await waitFor(() => button.disabled, 3000, 'Nút tạo audio không chuyển sang trạng thái bận')
+  await waitFor(() => (document.querySelector('.narration-preview') && document.querySelector('.narration-preview') !== previousPreview) || window.__ttsAlerts.length, 180000, 'Tạo audio quá thời gian')
   clearInterval(sampler)
   const audioPreview = document.querySelector('.narration-preview')
   const playAudio = audioPreview?.querySelector('button')
@@ -93,7 +110,7 @@ const result = await evaluate(`(async () => {
     visibleVoice,
     states,
     alerts: window.__ttsAlerts,
-    hasAudio: Boolean(audioPreview),
+    hasAudio: Boolean(audioPreview && audioPreview !== previousPreview),
     duration: audioPreview?.querySelector('span')?.textContent ?? '',
     audioPlaybackStarted: playAudio?.disabled === true,
   }
@@ -103,6 +120,7 @@ result.passed = result.overlayDuringPlayback.blockCount > 0
   && result.overlayDuringPlayback.visibility !== 'hidden'
   && result.overlayDuringPlayback.opacity !== '0'
   && result.hasAudio && result.audioPlaybackStarted && result.alerts.length === 0
+  && result.states.some((state) => state.includes('Đang'))
   && !/piper|matcha|onnx|checkpoint/i.test(result.visibleVoice)
 socket.close()
 console.log(JSON.stringify(result, null, 2))

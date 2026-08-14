@@ -23,10 +23,11 @@
     "test:subtitle-browser": "node scripts/cdp-subtitle-e2e.mjs",
     "test:matcha-web": "node scripts/probe-matcha-ort-web.mjs",
     "test:tts-browser": "node scripts/cdp-tts-matcha-overlay-e2e.mjs",
+    "test:tts-vi-browser": "node scripts/cdp-tts-vietnamese-voices-e2e.mjs",
+    "test:piper-vi-web": "node scripts/probe-piper-vi-ort-web.mjs",
     "test:go": "go test ./wasm-src"
   },
   "dependencies": {
-    "@mintplex-labs/piper-tts-web": "^1.0.3",
     "@vitejs/plugin-react": "latest",
     "onnxruntime-web": "^1.18.0",
     "react": "latest",

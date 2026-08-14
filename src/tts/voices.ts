@@ -31,7 +31,12 @@ export const TTS_VOICES: Voice[] = [
   {
     id: 'vi-community-light', displayName: 'Giọng Việt nhẹ', language: 'vi', engine: 'piper',
     sourceCheckpoint: 'vi_VN-vivos-x_low', piperId: 'vi_VN-vivos-x_low', sampleRate: 16000,
-    modelUrls: piper('vi/vi_VN/vivos/x_low', 'vi_VN-vivos-x_low'),
+    modelUrls: { onnx: 'voices/vi-vivos-x-low.onnx', config: 'voices/vi-vivos-x-low.onnx.json' },
+  },
+  {
+    id: 'vi-community-narrator', displayName: 'Giọng Việt kể chuyện', language: 'vi', engine: 'piper',
+    sourceCheckpoint: 'vi_VN-25hours_single-low', piperId: 'vi_VN-25hours_single-low', sampleRate: 16000,
+    modelUrls: { onnx: 'voices/vi-25hours-low.onnx', config: 'voices/vi-25hours-low.onnx.json' },
   },
   {
     id: 'en-warm-female', displayName: 'Warm female voice', language: 'en', engine: 'matcha',

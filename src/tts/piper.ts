@@ -1,75 +1,104 @@
 /// <reference lib="webworker" />
-import { TtsSession } from '@mintplex-labs/piper-tts-web'
+import * as ort from 'onnxruntime-web'
 import type { ProgressReporter, TtsResult, Voice } from './types'
 import { resolveVoiceUrl } from './voices'
 
-const nativeFetch = self.fetch.bind(self)
-let activeVoice: Voice | null = null
-let activeBase = './'
-let cachedSession: TtsSession | null = null
-let cachedVoiceId = ''
-let interceptionInstalled = false
-
-function installAssetInterception() {
-  if (interceptionInstalled) return
-  interceptionInstalled = true
-  self.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const raw = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
-    if (activeVoice) {
-      const filename = new URL(raw, activeBase).pathname.split('/').pop() ?? ''
-      if (filename === `${activeVoice.piperId}.onnx.json`) return fetchAsset(resolveVoiceUrl(activeVoice.modelUrls.config, activeBase), init)
-      if (filename === `${activeVoice.piperId}.onnx`) return fetchAsset(resolveVoiceUrl(activeVoice.modelUrls.onnx, activeBase), init)
-      if (filename === 'piper_phonemize.data') return fetchAsset(`${activeBase}piper/piper_phonemize.data`, init)
-      if (filename === 'piper_phonemize.wasm') return fetchAsset(`${activeBase}piper/piper_phonemize.wasm`, init)
-      if (filename.startsWith('ort-') && filename.endsWith('.wasm')) return fetchAsset(`${activeBase}ort/${filename}`, init)
-    }
-    return fetchAsset(input, init)
-  }) as typeof fetch
+interface PiperConfig {
+  audio: { sample_rate: number }
+  espeak: { voice: string }
+  inference: { noise_scale: number; length_scale: number; noise_w: number }
+  num_symbols: number
+  num_speakers: number
+  phoneme_id_map: Record<string, number[]>
+  phoneme_map?: Record<string, string[]>
+  speaker_id_map: Record<string, number>
 }
 
-async function fetchAsset(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const response = await nativeFetch(input, init)
-  const contentType = response.headers.get('content-type') ?? ''
-  if (!response.ok || contentType.includes('text/html')) throw new Error(`Không tải được dữ liệu giọng đọc (${response.status}).`)
-  return response
-}
+const sessions = new Map<string, ort.InferenceSession>()
+const configs = new Map<string, PiperConfig>()
 
 export async function synthesize(text: string, voice: Voice, baseUrl: string, report: ProgressReporter): Promise<TtsResult> {
-  if (!voice.piperId) throw new Error('Cấu hình giọng đọc không hợp lệ.')
-  installAssetInterception()
-  activeVoice = voice
-  activeBase = baseUrl
+  ort.env.wasm.wasmPaths = `${baseUrl}ort/`
+  ort.env.wasm.numThreads = 1
+  const configUrl = resolveVoiceUrl(voice.modelUrls.config, baseUrl)
+  const modelUrl = resolveVoiceUrl(voice.modelUrls.onnx, baseUrl)
   report({ phase: 'download', percent: 0 })
-  if (cachedVoiceId !== voice.id) { TtsSession._instance = null; cachedSession = null }
-  const session = cachedSession ?? await TtsSession.create({
-    voiceId: voice.piperId,
-    wasmPaths: {
-      onnxWasm: `${baseUrl}ort/`,
-      piperData: `${baseUrl}piper/piper_phonemize.data`,
-      piperWasm: `${baseUrl}piper/piper_phonemize.wasm`,
-    },
-    progress: ({ loaded, total }) => report({ phase: 'download', percent: total ? Math.round(loaded / total * 100) : 0 }),
-  })
-  cachedSession = session
-  cachedVoiceId = voice.id
+
+  const config = configs.get(voice.id) ?? await fetchConfig(configUrl)
+  configs.set(voice.id, config)
+  const session = sessions.get(voice.id) ?? await createSession(modelUrl, report)
+  sessions.set(voice.id, session)
   report({ phase: 'download', percent: 100 })
+
+  const ids = await phonemize(text, config, baseUrl)
+  if (!ids.length || Math.max(...ids) >= config.num_symbols) throw new Error('Dữ liệu phát âm không tương thích với giọng đã chọn.')
   report({ phase: 'inference' })
-  const wav = new Uint8Array(await (await session.predict(text)).arrayBuffer())
-  return { pcm: wavPcm16ToFloat32(wav), sampleRate: voice.sampleRate }
+  const feeds: Record<string, ort.Tensor> = {
+    input: new ort.Tensor('int64', BigInt64Array.from(ids, BigInt), [1, ids.length]),
+    input_lengths: new ort.Tensor('int64', BigInt64Array.from([BigInt(ids.length)]), [1]),
+    scales: new ort.Tensor('float32', Float32Array.from([
+      config.inference.noise_scale,
+      config.inference.length_scale,
+      config.inference.noise_w,
+    ]), [3]),
+  }
+  if (config.num_speakers > 1) feeds.sid = new ort.Tensor('int64', BigInt64Array.from([0n]), [1])
+  const output = await session.run(feeds)
+  const pcm = output.output?.data
+  if (!(pcm instanceof Float32Array) || pcm.length === 0) throw new Error('Không tạo được dữ liệu âm thanh cho giọng đã chọn.')
+  return { pcm: new Float32Array(pcm), sampleRate: config.audio.sample_rate }
 }
 
-function wavPcm16ToFloat32(wav: Uint8Array): Float32Array {
-  const view = new DataView(wav.buffer, wav.byteOffset, wav.byteLength)
-  let offset = 12
-  while (offset + 8 <= wav.byteLength) {
-    const name = String.fromCharCode(...wav.subarray(offset, offset + 4))
-    const size = view.getUint32(offset + 4, true)
-    if (name === 'data') {
-      const samples = new Float32Array(Math.floor(size / 2))
-      for (let index = 0; index < samples.length; index++) samples[index] = view.getInt16(offset + 8 + index * 2, true) / 32768
-      return samples
-    }
-    offset += 8 + size + (size & 1)
+async function fetchConfig(url: string): Promise<PiperConfig> {
+  const response = await fetch(url)
+  if (!response.ok || (response.headers.get('content-type') ?? '').includes('text/html')) throw new Error(`Không tải được cấu hình giọng đọc (${response.status}).`)
+  return response.json() as Promise<PiperConfig>
+}
+
+async function createSession(url: string, report: ProgressReporter): Promise<ort.InferenceSession> {
+  const response = await fetch(url)
+  if (!response.ok || (response.headers.get('content-type') ?? '').includes('text/html')) throw new Error(`Không tải được dữ liệu giọng đọc (${response.status}).`)
+  const total = Number(response.headers.get('content-length')) || 0
+  if (!response.body) return ort.InferenceSession.create(await response.arrayBuffer(), { executionProviders: ['wasm'] })
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let loaded = 0
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    chunks.push(value)
+    loaded += value.byteLength
+    report({ phase: 'download', percent: total ? Math.round(loaded / total * 100) : 0 })
   }
-  throw new Error('Dữ liệu âm thanh trả về không hợp lệ.')
+  const bytes = new Uint8Array(loaded)
+  let offset = 0
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength }
+  return ort.InferenceSession.create(bytes, { executionProviders: ['wasm'] })
+}
+
+async function phonemize(text: string, config: PiperConfig, baseUrl: string): Promise<number[]> {
+  const worker = new Worker(`${baseUrl}piper/phonemize.worker.js`)
+  try {
+    return await new Promise<number[]>((resolve, reject) => {
+      const timeout = self.setTimeout(() => reject(new Error('Bộ xử lý phát âm không phản hồi.')), 30_000)
+      worker.onmessage = (event: MessageEvent<{ ids?: number[]; error?: string }>) => {
+        self.clearTimeout(timeout)
+        if (event.data.error) reject(new Error(event.data.error))
+        else resolve(event.data.ids ?? [])
+      }
+      worker.onerror = () => {
+        self.clearTimeout(timeout)
+        reject(new Error('Không khởi động được bộ xử lý phát âm.'))
+      }
+      worker.postMessage({
+        text,
+        config,
+        scriptUrl: `${baseUrl}piper/piper_phonemize.js`,
+        wasmUrl: `${baseUrl}piper/piper_phonemize.wasm`,
+        dataUrl: `${baseUrl}piper/piper_phonemize.data`,
+      })
+    })
+  } finally {
+    worker.terminate()
+  }
 }
