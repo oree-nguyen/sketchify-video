@@ -1,7 +1,7 @@
 export interface Rect { x: number; y: number; w: number; h: number }
 export interface Pt { x: number; y: number }
 export interface WorkImage { rgba: Uint8Array; gray: Uint8Array; ink: Uint8Array; w: number; h: number; bg: [number, number, number] }
-export interface DrawUnit { type: 'path' | 'area'; blockId: number; bbox: Rect; pixels: number[]; path: number[]; color: [number, number, number]; cost: number; t0: number; t1: number; _tile?: HTMLCanvasElement; _pathScratch?: HTMLCanvasElement }
+export interface DrawUnit { type: 'path' | 'area'; blockId: number; bbox: Rect; pixels: number[]; path: number[]; color: [number, number, number]; cost: number; t0: number; t1: number; pauseAfterMs?: number; _tile?: HTMLCanvasElement; _pathScratch?: HTMLCanvasElement }
 export interface Block { id: number; bbox: Rect; centroid: Pt; inkArea: number; pixels: number[]; kind: 'vector' | 'photo'; x: number; y: number; width: number; height: number; area: number }
 export interface AnalysisStats {
   blocks: number

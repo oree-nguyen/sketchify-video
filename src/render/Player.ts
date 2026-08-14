@@ -3,6 +3,7 @@ import type { FrameSettings } from '../state/settingsDefaults'
 import type { ObjectSettings } from '../state/projectStore'
 import { buildCameraTimeline, cameraAt, cameraFocusBlockAt } from '../camera/cameraTimeline'
 import { resolvePushHand } from '../assets/hands/pushRegistry'
+import { activeScheduledUnit, buildDrawUnitSchedule, drawingProgressAt } from '../timeline/drawUnitSchedule'
 
 export interface PlayerOptions {
   sourceUrl: string; drawDurationSec: number; holdDurationSec: number; fps: number
@@ -36,12 +37,12 @@ export class Player {
     const debugUnitIndex=Math.max(0,units.findIndex(unit=>unit.type==='area'))
     const recorder=record?makeRecorder(this.displayCanvas,this.options.fps):undefined,chunks:BlobPart[]=[]
     if(recorder){recorder.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};recorder.start(100)}
-    const started=performance.now(),drawMs=this.options.drawDurationSec*1000,totalMs=(this.options.drawDurationSec+this.options.holdDurationSec)*1000
+    const started=performance.now(),schedule=buildDrawUnitSchedule(units,this.options.drawDurationSec),drawMs=schedule.totalDurationMs,totalMs=drawMs+this.options.holdDurationSec*1000
     let previousProgress=0,unitCursor=0,lastHand:{x:number;y:number}|null=null,angle=0,debugBeforeLogged=false,debugPartialLogs=0,debugPixelLogged=false,finalVerificationLogged=false,cameraSampleBucket=-1
     return await new Promise<PlayResult>((resolve)=>{
       const frame=(now:number)=>{
         const elapsed=now-started
-        const progress=Math.min(1,elapsed/drawMs)
+        const progress=drawingProgressAt(schedule,elapsed)
         onProgress?.(elapsed/1000)
         const debugUnit=units[debugUnitIndex]
         if(debugUnit&&!debugBeforeLogged&&progress<debugUnit.t0){console.log('[Sketchify] tile alpha trace',{phase:'before-t0',unitIndex:debugUnitIndex,progress,t0:debugUnit.t0,ctxGlobalAlpha:ctx.globalAlpha,drawImage:false});debugBeforeLogged=true}
@@ -65,7 +66,8 @@ export class Player {
           if(current>prior){const renderAsPath=objectSettings?.kindOverride==='photo'?false:(objectSettings?.kindOverride==='vector'?u.path.length>=4:u.type==='path');if(renderAsPath)drawPathDelta(ctx,u,prior,current,getUnitTile(u,img.rgba,img.bg,w),objectSettings);else{const old=unitAlpha[i];const alpha=old<1?(current-old)/(1-old):0;if(alpha>0){ctx.save();ctx.globalAlpha=alpha;ctx.filter='none';if(i===debugUnitIndex&&debugPartialLogs<4){console.log('[Sketchify] tile alpha trace',{phase:'partial-before-drawImage',unitIndex:i,progress,t0:u.t0,t1:u.t1,accumulatedBefore:old,requestedAlpha:alpha,ctxGlobalAlpha:ctx.globalAlpha});debugPartialLogs++}ctx.drawImage(getUnitTile(u,img.rgba,img.bg,w),u.bbox.x,u.bbox.y);ctx.restore();unitAlpha[i]=current}}}
           break
         }
-        const active=elapsed<drawMs?units.find(u=>progress>=u.t0&&progress<u.t1&&usesStandardReveal(this.options.objectSettingsByBlockId?.[u.blockId])):undefined
+        const scheduledActive=elapsed<drawMs?activeScheduledUnit(schedule,elapsed):undefined
+        const active=scheduledActive&&usesStandardReveal(this.options.objectSettingsByBlockId?.[scheduledActive.unit.blockId])?scheduledActive.unit:undefined
         const crop=cameraAt(camera?.keys??[{t:0,crop:{x:0,y:0,w,h},easing:'linear'}],progress)
         const sampleBucket=Math.min(9,Math.floor(progress*10))
         if(active&&sampleBucket!==cameraSampleBucket){

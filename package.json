@@ -17,6 +17,8 @@
     "test:object-settings-browser": "node scripts/cdp-object-settings-e2e.mjs",
     "test:ai-ui-browser": "node scripts/cdp-ai-ui-e2e.mjs",
     "test:ai-story-browser": "node scripts/cdp-ai-story-e2e.mjs",
+    "test:piper-browser": "node scripts/cdp-piper-e2e.mjs",
+    "test:pause-browser": "node scripts/cdp-pause-e2e.mjs",
     "test:go": "go test ./wasm-src"
   },
   "dependencies": {

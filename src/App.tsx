@@ -9,7 +9,7 @@ import { beginPollinationsAuth, consumeAuthCallbackResult, disconnectPollination
 import { generateImage as pollinationsGenerateImage, generateSpeech, generateStoryScript } from './ai/pollinationsClient'
 import type { StoryProgress, StoryScene, StorySceneFailure } from './ai/types'
 import { ProjectPlayer } from './render/ProjectPlayer'
-import { createFrame, createFrameFromSource, frameDrawDurationSec, mergeFrameObjects, objectDropInsertionIndex, reconcileFrameObjects, setFrameCamera, setFrameCameraPinned, setFrameHold, setFramePageZoom, setFrameTransition, setObjectDuration, setObjectEffect, setObjectOrder, setObjectPush, setObjectZoomFollow, syncFrameDuration, type AudioClip, type Frame, type ObjectSettings, type Project } from './state/projectStore'
+import { createFrame, createFrameFromSource, frameDrawDurationSec, mergeFrameObjects, objectDropInsertionIndex, reconcileFrameObjects, setFrameCamera, setFrameCameraPinned, setFrameHold, setFramePageZoom, setFramePauseSettings, setFrameTransition, setObjectDuration, setObjectEffect, setObjectOrder, setObjectPush, setObjectZoomFollow, syncFrameDuration, type AudioClip, type Frame, type ObjectSettings, type Project } from './state/projectStore'
 import type { FrameSettings } from './state/settingsDefaults'
 import { buildProjectTimeline } from './timeline/projectTimeline'
 import { analyzeImage, type Analysis } from './wasm/wasmClient'
@@ -164,6 +164,13 @@ export default function App() {
     if (patch.holdDurationSec !== undefined) next = setFrameHold(next, frameId, patch.holdDurationSec)
     if (patch.camera) next = setFrameCamera(next, frameId, patch.camera)
     if (patch.pageZoom) next = setFramePageZoom(next, frameId, patch.pageZoom)
+    if (patch.microPauseMs !== undefined || patch.groupPauseMs !== undefined || patch.proximityThresholdPct !== undefined) {
+      next = setFramePauseSettings(next, frameId, {
+        ...(patch.microPauseMs !== undefined ? { microPauseMs: patch.microPauseMs } : {}),
+        ...(patch.groupPauseMs !== undefined ? { groupPauseMs: patch.groupPauseMs } : {}),
+        ...(patch.proximityThresholdPct !== undefined ? { proximityThresholdPct: patch.proximityThresholdPct } : {}),
+      })
+    }
     if (patch.cameraPinned !== undefined) next = setFrameCameraPinned(next, frameId, patch.cameraPinned)
     return next
   })

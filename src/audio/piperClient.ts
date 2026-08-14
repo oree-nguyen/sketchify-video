@@ -1,4 +1,4 @@
-import { piperVoice } from './piperVoices'
+import { piperAssetBaseUrl, piperVoice } from './piperVoices'
 
 export type PiperProgress = { phase: 'download' | 'inference'; percent?: number }
 
@@ -19,7 +19,7 @@ export async function synthesizePiper(text: string, voiceId: string, onProgress?
       else resolve({ pcm: event.data.pcm!, sampleRate: event.data.sampleRate! })
     }
     worker!.addEventListener('message', listener)
-    worker!.postMessage({ id, text: normalized, voice: piperVoice(voiceId), baseUrl: import.meta.env.BASE_URL })
+    worker!.postMessage({ id, text: normalized, voice: piperVoice(voiceId), baseUrl: piperAssetBaseUrl() })
   })
   const context = new AudioContext()
   try {

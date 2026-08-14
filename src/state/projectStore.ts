@@ -1,6 +1,7 @@
 import { DEFAULT_SETTINGS } from './settingsDefaults'
 import type { PushEdge } from './settingsDefaults'
 import type { Analysis, Block, DrawUnit } from '../wasm/wasmClient'
+import { buildPages } from '../camera/pageZoom'
 
 export type HandStyleId = 'pencil' | 'feather-gray' | 'feather-white' | 'marker' | 'pen-blue'
 export type TransitionType = 'none' | 'zoom-morph' | 'paper-airplane' | 'paper-fold'
@@ -144,8 +145,13 @@ export function frameDrawDurationSec(frame: Pick<Frame, 'objects'>): number {
   return frame.objects.reduce((total, object) => total + Math.max(.05, object.settings.drawDurationSec), 0)
 }
 
-export function frameDurationSec(frame: Pick<Frame, 'objects' | 'settings'>): number {
-  return frameDrawDurationSec(frame) + Math.max(0, frame.settings.holdDurationSec)
+export function analysisPauseDurationSec(analysis: Pick<Analysis, 'units'> | null | undefined): number {
+  return (analysis?.units.reduce((total, unit) => total + Math.max(0, unit.pauseAfterMs ?? 0), 0) ?? 0) / 1000
+}
+
+export function frameDurationSec(frame: Pick<Frame, 'objects' | 'settings'> & Partial<Pick<Frame, 'analysis'>>): number {
+  const timed = frame.analysis && isAnalysis(frame.analysis) ? retimeAnalysisForFrame(frame.analysis, frame) : null
+  return frameDrawDurationSec(frame) + analysisPauseDurationSec(timed) + Math.max(0, frame.settings.holdDurationSec)
 }
 
 export function syncFrameDuration<T extends Frame>(frame: T): T {
@@ -172,7 +178,11 @@ export function setFrameCamera(project: Project, frameId: number, cameraPatch: P
 }
 
 export function setFramePageZoom(project: Project, frameId: number, pageZoomPatch: Partial<Frame['settings']['pageZoom']>): Project {
-  return updateProjectFrame(project, frameId, (frame) => ({ ...frame, settings: { ...frame.settings, pageZoom: { ...frame.settings.pageZoom, ...pageZoomPatch }, mergeRadius: 0 } }))
+  return updateProjectFrame(project, frameId, (frame) => syncFrameDuration({ ...frame, settings: { ...frame.settings, pageZoom: { ...frame.settings.pageZoom, ...pageZoomPatch }, mergeRadius: 0 } }))
+}
+
+export function setFramePauseSettings(project: Project, frameId: number, patch: Partial<Pick<Frame['settings'], 'microPauseMs' | 'groupPauseMs' | 'proximityThresholdPct'>>): Project {
+  return updateProjectFrame(project, frameId, (frame) => syncFrameDuration({ ...frame, settings: { ...frame.settings, ...patch, mergeRadius: 0 } }))
 }
 
 export function setFrameTransition(project: Project, frameId: number, transitionPatch: Partial<Frame['transitionToNext']>): Project {
@@ -190,7 +200,7 @@ export function setObjectOrder(project: Project, frameId: number, objectId: stri
     if (from < 0) return frame
     const [moved] = objects.splice(from, 1)
     objects.splice(Math.max(0, Math.min(objects.length, order)), 0, moved)
-    return { ...frame, objects: objects.map((object, index) => ({ ...object, settings: { ...object.settings, order: index } })) }
+    return syncFrameDuration({ ...frame, objects: objects.map((object, index) => ({ ...object, settings: { ...object.settings, order: index } })) })
   })
 }
 
@@ -290,10 +300,10 @@ export function reorderFrameObjects(frame: Frame, fromObjectId: string, toObject
   if (from < 0 || to < 0 || from === to) return frame
   const [moved] = objects.splice(from, 1)
   objects.splice(to, 0, moved)
-  return { ...frame, objects: objects.map((object, order) => ({ ...object, settings: { ...object.settings, order } })) }
+  return syncFrameDuration({ ...frame, objects: objects.map((object, order) => ({ ...object, settings: { ...object.settings, order } })) })
 }
 
-export function retimeAnalysisForFrame(analysis: Analysis, frame: Pick<Frame, 'objects'>): Analysis {
+export function retimeAnalysisForFrame(analysis: Analysis, frame: Pick<Frame, 'objects' | 'settings'>): Analysis {
   const ordered = [...frame.objects].sort((a, b) => a.settings.order - b.settings.order)
   const total = Math.max(.000001, frameDrawDurationSec(frame))
   let cursorSec = 0
@@ -313,5 +323,30 @@ export function retimeAnalysisForFrame(analysis: Analysis, frame: Pick<Frame, 'o
   }
   const blockById = new Map(analysis.blocks.map((block) => [block.id, block]))
   const blocks = ordered.map((object) => blockById.get(object.blockId)).filter((block): block is Block => Boolean(block))
-  return { ...analysis, blocks, units, stats: { ...analysis.stats, units: units.length, blocks: blocks.length } }
+  const pageStarts = frame.settings.pageZoom.enabled
+    ? new Set(buildPages(blocks, units, frame.settings).slice(1).map((page) => timeKey(page.t0)))
+    : new Set<string>()
+  const pausedUnits = units.map((unit, index) => {
+    const next = units[index + 1]
+    if (!next || next.blockId === unit.blockId) return { ...unit, pauseAfterMs: 0 }
+    const forceGroupPause = pageStarts.has(timeKey(next.t0))
+    const proximityRatio = bboxEdgeDistance(unit.bbox, next.bbox) / Math.max(1, unit.bbox.w, unit.bbox.h, next.bbox.w, next.bbox.h)
+    const pauseAfterMs = forceGroupPause || proximityRatio > frame.settings.proximityThresholdPct / 100
+      ? frame.settings.groupPauseMs
+      : frame.settings.microPauseMs
+    return { ...unit, pauseAfterMs }
+  })
+  return { ...analysis, blocks, units: pausedUnits, stats: { ...analysis.stats, units: pausedUnits.length, blocks: blocks.length } }
+}
+
+function bboxEdgeDistance(a: Block['bbox'], b: Block['bbox']): number {
+  const dx = Math.max(0, Math.max(a.x, b.x) - Math.min(a.x + a.w, b.x + b.w))
+  const dy = Math.max(0, Math.max(a.y, b.y) - Math.min(a.y + a.h, b.y + b.h))
+  return Math.hypot(dx, dy)
+}
+
+function timeKey(value: number): string { return value.toFixed(9) }
+
+function isAnalysis(value: unknown): value is Analysis {
+  return Boolean(value && typeof value === 'object' && Array.isArray((value as Analysis).units) && Array.isArray((value as Analysis).blocks))
 }

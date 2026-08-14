@@ -9,6 +9,7 @@ export interface FrameSettings {
   probeColors:number; minProbeRegion:number; photoDensityThreshold:number
   vectorLevels:number; vectorMinRegionArea:number; photoClusters:number; photoMinRegionArea:number
   holdDurationSec:number; fps:30|60; maxUnits:number
+  microPauseMs:number; groupPauseMs:number; proximityThresholdPct:number
   camera:{mode:CameraMode;zoomPadding:number;zoomLevel:number;zoomOutPortion:number;maxBlocksForAutoFollow:number;manualKeyframes:Array<{blockId:number;crop:{x:number;y:number;w:number;h:number}}>}
   pageZoom:{enabled:boolean;mode:PageZoomMode;pageGroups:number[][];transitionSec:number;padding:number}
   handPushEnding:{enabled:boolean}
@@ -21,6 +22,7 @@ export const DEFAULT_SETTINGS:FrameSettings={
   probeColors:8,minProbeRegion:16,photoDensityThreshold:.012,
   vectorLevels:6,vectorMinRegionArea:6,photoClusters:10,photoMinRegionArea:10,
   holdDurationSec:2,fps:30,maxUnits:2000,
+  microPauseMs:200,groupPauseMs:600,proximityThresholdPct:20,
   camera:{mode:'D-hybrid',zoomPadding:.12,zoomLevel:2.6,zoomOutPortion:.18,maxBlocksForAutoFollow:25,manualKeyframes:[]},
   pageZoom:{enabled:false,mode:'auto-rows',pageGroups:[],transitionSec:1,padding:.08},
   handPushEnding:{enabled:false},

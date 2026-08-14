@@ -1,5 +1,5 @@
 import { HAND_ASSETS } from '../assets/hands/registry'
-import { frameDrawDurationSec, retimeAnalysisForFrame, type Frame, type Project } from '../state/projectStore'
+import { analysisPauseDurationSec, frameDrawDurationSec, retimeAnalysisForFrame, type Frame, type Project } from '../state/projectStore'
 import { buildProjectTimeline } from '../timeline/projectTimeline'
 import type { Analysis } from '../wasm/wasmClient'
 import { Player } from './Player'
@@ -55,8 +55,10 @@ export class ProjectPlayer {
       const nextHalf = nextTransitionHalf(this.project.frames, segment.frameIndex)
       const playableDuration = Math.max(0.001, segment.durationSec - previousHalf - nextHalf)
       const naturalDrawDuration = frameDrawDurationSec(frame)
-      const drawDuration = Math.min(naturalDrawDuration, playableDuration)
-      const holdDuration = Math.max(0, playableDuration - drawDuration)
+      const timedAnalysis = retimeAnalysisForFrame(this.analyses[frame.id], frame)
+      const pauseDuration = analysisPauseDurationSec(timedAnalysis)
+      const drawDuration = Math.min(naturalDrawDuration, Math.max(0.001, playableDuration - pauseDuration))
+      const holdDuration = Math.max(0, playableDuration - drawDuration - pauseDuration)
       const globalStart = segment.startSec + previousHalf
 
       const player = new Player(this.canvas, {
@@ -64,7 +66,7 @@ export class ProjectPlayer {
         drawDurationSec: drawDuration,
         holdDurationSec: holdDuration,
         fps: frame.settings.fps,
-        analysis: retimeAnalysisForFrame(this.analyses[frame.id], frame),
+        analysis: timedAnalysis,
         hand: HAND_ASSETS[this.project.handStyle],
         settings: { ...frame.settings, holdDurationSec: holdDuration },
         zoomBlockIds: frame.objects.filter((object) => object.settings.zoomFollow).map((object) => object.blockId),

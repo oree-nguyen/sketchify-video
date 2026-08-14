@@ -19,14 +19,23 @@ let cachedVoiceId = ''
 self.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
   const raw = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
   if (activeVoice) {
-    if (raw.endsWith(`${activeVoice.piperId}.onnx.json`)) return nativeFetch(activeVoice.onnxConfigUrl, init)
-    if (raw.endsWith(`${activeVoice.piperId}.onnx`)) return nativeFetch(activeVoice.onnxUrl, init)
-    if (raw.includes('piper_phonemize.data')) return nativeFetch(`${activeBase}piper/piper_phonemize.data`, init)
-    if (raw.includes('piper_phonemize.wasm')) return nativeFetch(`${activeBase}piper/piper_phonemize.wasm`, init)
-    if (raw.includes('onnxruntime-web') && raw.endsWith('.wasm')) return nativeFetch(`${activeBase}ort/${raw.split('/').pop()}`, init)
+    const filename = new URL(raw, activeBase).pathname.split('/').pop() ?? ''
+    if (filename === `${activeVoice.piperId}.onnx.json`) return fetchAsset(activeVoice.onnxConfigUrl, init)
+    if (filename === `${activeVoice.piperId}.onnx`) return fetchAsset(activeVoice.onnxUrl, init)
+    if (filename === 'piper_phonemize.data') return fetchAsset(`${activeBase}piper/piper_phonemize.data`, init)
+    if (filename === 'piper_phonemize.wasm') return fetchAsset(`${activeBase}piper/piper_phonemize.wasm`, init)
+    if (filename.startsWith('ort-') && filename.endsWith('.wasm')) return fetchAsset(`${activeBase}ort/${filename}`, init)
   }
-  return nativeFetch(input, init)
+  return fetchAsset(input, init)
 }) as typeof fetch
+
+async function fetchAsset(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const response = await nativeFetch(input, init)
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+  const contentType = response.headers.get('content-type') ?? ''
+  if (!response.ok || contentType.includes('text/html')) throw new Error(`Piper asset không hợp lệ: ${response.status} ${url} (${contentType || 'không có content-type'})`)
+  return response
+}
 
 self.onmessage = async (event: MessageEvent<Request>) => {
   const { id, text, voice, baseUrl } = event.data
@@ -45,6 +54,8 @@ self.onmessage = async (event: MessageEvent<Request>) => {
       progress: ({ loaded, total }) => post({ id, type: 'progress', phase: 'download', percent: total ? Math.round(loaded / total * 100) : 0 }),
     })
     cachedSession = session; cachedVoiceId = voice.id
+    post({ id, type: 'progress', phase: 'download', percent: 100 })
+    await new Promise((resolve) => setTimeout(resolve, 80))
     post({ id, type: 'progress', phase: 'inference' })
     const wav = new Uint8Array(await (await session.predict(text)).arrayBuffer())
     const pcm = wavPcm16ToFloat32(wav)

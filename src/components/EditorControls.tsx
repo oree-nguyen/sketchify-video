@@ -124,6 +124,15 @@ export function EditPanel({ frame, analysis, last, scope, setScope, selectedObje
         <button className="danger-button" type="button" onClick={removeFrame}>Xoá khung hình</button>
       </Accordion>}
 
+      {scope === 'frame' && <Accordion title="07 · Nhịp nghỉ" meta={`${frame.settings.microPauseMs}/${frame.settings.groupPauseMs}ms`}>
+        <RangeField label="Nghỉ giữa vật thể-nhãn" value={frame.settings.microPauseMs} min={100} max={300} step={10} unit="ms" onChange={(microPauseMs) => updateFrameSettings({ microPauseMs })} />
+        <RangeField label="Nghỉ khi chuyển ý khác" value={frame.settings.groupPauseMs} min={400} max={800} step={20} unit="ms" onChange={(groupPauseMs) => updateFrameSettings({ groupPauseMs })} />
+        <details className="advanced-settings">
+          <summary>Nâng cao</summary>
+          <RangeField label="Ngưỡng phân biệt gần/xa" value={frame.settings.proximityThresholdPct} min={5} max={40} step={1} unit="%" onChange={(proximityThresholdPct) => updateFrameSettings({ proximityThresholdPct })} />
+        </details>
+      </Accordion>}
+
       {scope === 'frame' && <Accordion title="Camera" meta={cameraOptions.find((option) => option.value === frame.settings.camera.mode)?.label}>
         <ToggleRow label="Ghim camera" checked={frame.settings.cameraPinned} onChange={(cameraPinned) => { if (cameraPinned && frame.objects.some((object) => object.settings.zoomFollow)) window.alert('Đang có vật thể bật Zoom theo vật thể. Vui lòng tắt Zoom theo vật thể trước khi bật Ghim camera.'); else updateFrameSettings({ cameraPinned }) }} />
         <SelectMenu label="Chế độ camera" value={frame.settings.camera.mode} options={cameraOptions} onChange={(mode) => updateFrameSettings({ camera: { ...frame.settings.camera, mode } })} />

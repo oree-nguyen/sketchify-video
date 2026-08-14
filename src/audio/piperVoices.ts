@@ -7,14 +7,26 @@ export interface PiperVoice {
   sampleRate: number
 }
 
-const base = import.meta.env.BASE_URL
+function currentDocumentBase(): string {
+  if (typeof document !== 'undefined') return document.baseURI
+  if (typeof location !== 'undefined') return location.href
+  return 'http://localhost/'
+}
+
+export function piperAssetBaseUrl(documentBase = currentDocumentBase(), viteBase = import.meta.env.BASE_URL): string {
+  return new URL(viteBase, documentBase).href
+}
+
+export function piperAssetUrl(path: string, documentBase = currentDocumentBase(), viteBase = import.meta.env.BASE_URL): string {
+  return new URL(path, piperAssetBaseUrl(documentBase, viteBase)).href
+}
 
 export const PIPER_VOICES: PiperVoice[] = [{
   id: 'vi-default',
   piperId: 'vi_VN-vais1000-medium',
   displayName: 'Giọng Việt mặc định (VAIS1000)',
-  onnxUrl: `${base}voices/vi-default.onnx`,
-  onnxConfigUrl: `${base}voices/vi-default.onnx.json`,
+  onnxUrl: piperAssetUrl('voices/vi-default.onnx'),
+  onnxConfigUrl: piperAssetUrl('voices/vi-default.onnx.json'),
   sampleRate: 22050,
 }]
 
