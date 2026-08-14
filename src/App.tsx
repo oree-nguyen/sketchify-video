@@ -14,7 +14,8 @@ import { createEmptyProject, createFrame, createFrameFromSource, frameDrawDurati
 import type { FrameSettings } from './state/settingsDefaults'
 import { buildProjectTimeline } from './timeline/projectTimeline'
 import { analyzeImage, type Analysis } from './wasm/wasmClient'
-import { synthesizePiper, type PiperProgress } from './audio/piperClient'
+import { synthesizeSpeech } from './tts/ttsClient'
+import type { TtsProgress } from './tts/types'
 import { createSession, deleteSession, listSessions, loadSession, makeSessionRecord, resolveInitialSession, restoreProject, saveSession, setActiveSessionId, type SessionSummary } from './state/sessionStore'
 
 export default function App() {
@@ -35,8 +36,8 @@ export default function App() {
   const [aiBusy, setAiBusy] = useState(false)
   const [aiProgress, setAiProgress] = useState<StoryProgress | null>(null)
   const [aiFailures, setAiFailures] = useState<StorySceneFailure[]>([])
-  const [piperBusy, setPiperBusy] = useState(false)
-  const [piperProgress, setPiperProgress] = useState<PiperProgress | null>(null)
+  const [ttsBusy, setTtsBusy] = useState(false)
+  const [ttsProgress, setTtsProgress] = useState<TtsProgress | null>(null)
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   const [activeSessionId, setActiveSessionIdState] = useState<string | null>(null)
   const [activeSessionName, setActiveSessionName] = useState('')
@@ -241,19 +242,19 @@ export default function App() {
     setSelectedObjectIds([result.objectId])
   }
 
-  const createPiperNarration = async (text: string, voiceId: string) => {
+  const createNarration = async (text: string, voiceId: string) => {
     if (!active) return
     const frameId = active.id
-    setPiperBusy(true); setPiperProgress({ phase: 'download', percent: 0 })
+    setTtsBusy(true); setTtsProgress({ phase: 'download', percent: 0 })
     try {
-      const audioBuffer = await synthesizePiper(text, voiceId, setPiperProgress)
+      const audioBuffer = await synthesizeSpeech(text, voiceId, setTtsProgress)
       setProject((current) => ({ ...current, frames: current.frames.map((frame) => {
         if (frame.id !== frameId) return frame
         const requiredHold = Math.max(frame.settings.holdDurationSec, audioBuffer.duration - frameDrawDurationSec(frame))
         return syncFrameDuration({ ...frame, settings: { ...frame.settings, holdDurationSec: Math.max(0, requiredHold) }, narration: { text: text.trim(), voiceId, audioBuffer, generatedAt: new Date().toISOString() } })
       }) }))
     } catch (error) { window.alert(errorMessage(error)) }
-    finally { setPiperBusy(false); setPiperProgress(null) }
+    finally { setTtsBusy(false); setTtsProgress(null) }
   }
 
   const refreshSessions = async () => setSessions(await listSessions())
@@ -544,7 +545,7 @@ export default function App() {
       <FramePanel frames={project.frames} activeId={active?.id} select={selectFrame} upload={() => fileRef.current?.click()} create={() => openAiDialog()} regenerate={(frame) => void regenerateFrame(frame)} drop={handleDrop} connectPollinations={connectPollinations} onPointerMove={handleSpotlight} />
       <section className="stage spotlight-surface" onPointerMove={handleSpotlight}>
         <div className="stage-topline"><span>{active ? `KHUNG ${project.frames.findIndex((frame) => frame.id === active.id) + 1}` : 'SẴN SÀNG'}</span><span className="stage-diagnostics">{analysis && !showRender && <button className={`mask-toggle ${showInkMask ? 'active' : ''}`} type="button" aria-pressed={showInkMask} onClick={() => setShowInkMask((value) => !value)}>Ink mask</button>}<span>{analysisStatus === 'working' ? 'Đang phân tích bằng WASM…' : analysis ? `${analysis.blocks.length} vật thể đã tách` : analysisStatus === 'error' ? 'Không thể phân tích ảnh' : 'Thêm ảnh để bắt đầu'}</span></span></div>
-        <div className={`preview ${showRender ? 'has-render' : ''}`}>
+        <div className={`preview ${showRender ? 'has-render' : ''} ${isPlaying ? 'is-playing' : ''}`}>
           {active && <div className="analyzed-image">
             <canvas ref={canvasRef} className="render-canvas" aria-label="Canvas xem thử" />
             {!showRender && <img className="source-image" src={active.sourceUrl} alt="Khung hiện tại" />}
@@ -567,7 +568,7 @@ export default function App() {
         </div>
         <div className="transport"><div className="transport-left"><button className={`cc-toggle ${project.subtitle.enabled ? 'active' : ''}`} aria-label="Bật tắt phụ đề" aria-pressed={project.subtitle.enabled} onClick={() => updateSubtitle({ enabled: !project.subtitle.enabled })}>CC</button></div><div className="transport-center"><button disabled={isPlaying} onClick={() => setProgress(Math.max(0, progress - 10))}>−10</button><button className="play" disabled={!active} onClick={() => void play(false)}>{isPlaying ? 'Ⅱ' : '▶'}</button><button disabled={isPlaying} onClick={() => setProgress(Math.min(total, progress + 10))}>+10</button></div><span className="duration">{formatTime(progress)} / {formatTime(total)}</span></div>
         <input aria-label="Playhead" className="scrubber range-input" type="range" min="0" max={Math.max(total, 1)} step=".1" value={Math.min(progress, total)} style={{ '--range-progress': `${rangeProgress}%` } as CSSProperties} onChange={(event) => setProgress(Number(event.target.value))} />
-        {active && <NarrationBar frame={active} busy={piperBusy} progress={piperProgress} create={(text, voiceId) => void createPiperNarration(text, voiceId)} />}
+        {active && <NarrationBar frame={active} busy={ttsBusy} progress={ttsProgress} create={(text, voiceId) => void createNarration(text, voiceId)} />}
       </section>
       <aside className="inspector spotlight-surface" onPointerMove={handleSpotlight}>
         <nav className="tool-rail"><button className={panel === 'hand' ? 'active' : ''} onClick={() => setPanel('hand')} aria-label="Bàn tay" title="Bàn tay">✎</button>{active && <button className={panel === 'edit' ? 'active' : ''} onClick={() => setPanel('edit')} aria-label="Chỉnh sửa" title="Chỉnh sửa">☷</button>}<button className={panel === 'subtitle' ? 'active' : ''} onClick={() => setPanel('subtitle')} aria-label="Phụ đề" title="Phụ đề">CC</button></nav>

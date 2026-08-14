@@ -303,8 +303,9 @@ button:disabled { opacity: .45; }
 .narration-bar { margin-top: 12px; display: grid; grid-template-columns: minmax(0, 1fr) 190px; gap: 8px; padding: 10px; border: 1px solid #293640; border-radius: 10px; background: #0b1117; }
 .narration-bar textarea { min-height: 58px; resize: vertical; border: 1px solid #34434f; border-radius: 8px; padding: 9px 10px; background: #080e13; color: var(--text); outline: 0; }
 .narration-bar textarea:focus { border-color: var(--accent); box-shadow: 0 0 14px #84cc1635; }
-.narration-actions { display: grid; gap: 7px; }
+.narration-actions { display: grid; grid-template-columns: minmax(0, .7fr) minmax(0, 1.3fr); gap: 7px; }
 .narration-actions select { min-width: 0; border: 1px solid #34434f; border-radius: 7px; padding: 7px; background: #101820; color: #d9e2e9; }
+.narration-actions button { grid-column: 1 / -1; }
 .narration-preview { grid-column: 1 / -1; display: flex; align-items: center; gap: 9px; color: var(--accent-strong); font-size: 10px; }
 .waveform { height: 25px; flex: 1 1 auto; display: flex; align-items: center; gap: 2px; }
 .waveform i { width: 3px; border-radius: 99px; background: var(--accent); box-shadow: 0 0 5px #84cc1680; }

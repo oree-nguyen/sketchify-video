@@ -14,3 +14,12 @@
 - Model card: https://huggingface.co/rhasspy/piper-voices/tree/main/vi/vi_VN/vais1000/medium
 
 The voice model and configuration are distributed from `public/voices/` and fetched lazily only when narration is generated.
+
+## Additional speech voices
+
+- Official Piper voice checkpoints are fetched lazily from `rhasspy/piper-voices` and retain their published model-card licenses.
+- The English LJSpeech browser-check voice uses Akjava's community Matcha-TTS ONNX quantization (`ljspeech_sim_q8.onnx`, Apache-2.0 repository). The original Matcha-TTS implementation is MIT licensed.
+- The pronunciation dictionary in `public/tts/cmudict-0.7b` is the Carnegie Mellon Pronouncing Dictionary and retains its permissive CMU notice.
+- Matcha-TTS-VIVOS is intentionally not registered because the referenced public checkpoint no longer exists. VieNeu-TTS and Kani-TTS-Vie are not Matcha checkpoints; the ngngngan checkpoint is excluded because its published terms are non-commercial.
+
+Engine and checkpoint metadata is intentionally internal. End users select only friendly voice names in the application.

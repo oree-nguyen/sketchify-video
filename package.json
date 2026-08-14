@@ -21,6 +21,8 @@
     "test:pause-browser": "node scripts/cdp-pause-e2e.mjs",
     "test:session-browser": "node scripts/cdp-session-e2e.mjs",
     "test:subtitle-browser": "node scripts/cdp-subtitle-e2e.mjs",
+    "test:matcha-web": "node scripts/probe-matcha-ort-web.mjs",
+    "test:tts-browser": "node scripts/cdp-tts-matcha-overlay-e2e.mjs",
     "test:go": "go test ./wasm-src"
   },
   "dependencies": {

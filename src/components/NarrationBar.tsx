@@ -1,24 +1,40 @@
 import { useEffect, useState } from 'react'
 import type { Frame } from '../state/projectStore'
-import { DEFAULT_PIPER_VOICE_ID, PIPER_VOICES } from '../audio/piperVoices'
-import type { PiperProgress } from '../audio/piperClient'
+import type { TtsLanguage, TtsProgress } from '../tts/types'
+import { DEFAULT_VOICE_BY_LANGUAGE, TTS_VOICES, voiceById } from '../tts/voices'
 
 interface Props {
   frame: Frame
   busy: boolean
-  progress: PiperProgress | null
+  progress: TtsProgress | null
   create: (text: string, voiceId: string) => void
 }
 
 export function NarrationBar({ frame, busy, progress, create }: Props) {
   const [text, setText] = useState(frame.narration?.text ?? '')
-  const [voiceId, setVoiceId] = useState(frame.narration?.voiceId ?? DEFAULT_PIPER_VOICE_ID)
-  useEffect(() => { setText(frame.narration?.text ?? ''); setVoiceId(frame.narration?.voiceId ?? DEFAULT_PIPER_VOICE_ID) }, [frame.id, frame.narration?.generatedAt])
+  const savedVoiceId = frame.narration?.voiceId ?? DEFAULT_VOICE_BY_LANGUAGE.vi
+  const savedVoice = (() => { try { return voiceById(savedVoiceId) } catch { return voiceById(DEFAULT_VOICE_BY_LANGUAGE.vi) } })()
+  const [language, setLanguage] = useState<TtsLanguage>(savedVoice.language)
+  const [voiceId, setVoiceId] = useState(savedVoice.id)
+  useEffect(() => {
+    setText(frame.narration?.text ?? '')
+    let voice
+    try { voice = voiceById(frame.narration?.voiceId ?? DEFAULT_VOICE_BY_LANGUAGE.vi) }
+    catch { voice = voiceById(DEFAULT_VOICE_BY_LANGUAGE.vi) }
+    setLanguage(voice.language)
+    setVoiceId(voice.id)
+  }, [frame.id, frame.narration?.generatedAt])
+  const voices = TTS_VOICES.filter((voice) => voice.language === language)
   const status = progress?.phase === 'download' ? `Đang tải giọng đọc... ${progress.percent ?? 0}%` : progress?.phase === 'inference' ? 'Đang tạo giọng nói...' : null
   return <div className="narration-bar">
     <textarea aria-label="Lời thoại khung hình" placeholder="Nhập lời thoại cho khung hình này..." value={text} onChange={(event) => setText(event.target.value)} />
     <div className="narration-actions">
-      <select aria-label="Giọng đọc" value={voiceId} onChange={(event) => setVoiceId(event.target.value)}>{PIPER_VOICES.map((voice) => <option key={voice.id} value={voice.id}>{voice.displayName}</option>)}</select>
+      <select aria-label="Ngôn ngữ giọng đọc" value={language} onChange={(event) => {
+        const nextLanguage = event.target.value as TtsLanguage
+        setLanguage(nextLanguage)
+        setVoiceId(DEFAULT_VOICE_BY_LANGUAGE[nextLanguage])
+      }}><option value="vi">Tiếng Việt</option><option value="en">English</option></select>
+      <select aria-label="Giọng đọc" value={voiceId} onChange={(event) => setVoiceId(event.target.value)}>{voices.map((voice) => <option key={voice.id} value={voice.id}>{voice.displayName}</option>)}</select>
       <button className="export" disabled={busy || !text.trim()} onClick={() => create(text, voiceId)}>{busy ? status : frame.narration?.audioBuffer ? 'Tạo lại audio' : 'Tạo audio ▶'}</button>
     </div>
     {frame.narration?.audioBuffer && <AudioPreview buffer={frame.narration.audioBuffer} />}
