@@ -15,6 +15,7 @@ import type { FrameSettings } from './state/settingsDefaults'
 import { buildProjectTimeline } from './timeline/projectTimeline'
 import { analyzeImage, type Analysis } from './wasm/wasmClient'
 import { synthesizeSpeech } from './tts/ttsClient'
+import { estimateWordTimestamps } from './tts/wordTimestamps'
 import type { TtsProgress } from './tts/types'
 import { createSession, deleteSession, listSessions, loadSession, makeSessionRecord, resolveInitialSession, restoreProject, saveSession, setActiveSessionId, type SessionSummary } from './state/sessionStore'
 
@@ -242,16 +243,16 @@ export default function App() {
     setSelectedObjectIds([result.objectId])
   }
 
-  const createNarration = async (text: string, voiceId: string) => {
+  const createNarration = async (text: string, voiceId: string, speed: number) => {
     if (!active) return
     const frameId = active.id
     setTtsBusy(true); setTtsProgress({ phase: 'download', percent: 0 })
     try {
-      const audioBuffer = await synthesizeSpeech(text, voiceId, setTtsProgress)
+      const { audioBuffer, wordTimestamps } = await synthesizeSpeech(text, voiceId, speed, setTtsProgress)
       setProject((current) => ({ ...current, frames: current.frames.map((frame) => {
         if (frame.id !== frameId) return frame
         const requiredHold = Math.max(frame.settings.holdDurationSec, audioBuffer.duration - frameDrawDurationSec(frame))
-        return syncFrameDuration({ ...frame, settings: { ...frame.settings, holdDurationSec: Math.max(0, requiredHold) }, narration: { text: text.trim(), voiceId, audioBuffer, generatedAt: new Date().toISOString() } })
+        return syncFrameDuration({ ...frame, settings: { ...frame.settings, holdDurationSec: Math.max(0, requiredHold) }, narration: { text: text.trim(), voiceId, speed, wordTimestamps, audioBuffer, generatedAt: new Date().toISOString() } })
       }) }))
     } catch (error) { window.alert(errorMessage(error)) }
     finally { setTtsBusy(false); setTtsProgress(null) }
@@ -372,7 +373,7 @@ export default function App() {
       if (!frame) { URL.revokeObjectURL(sourceUrl); return current }
       const extraHold = Math.max(0, durationSec - frame.durationSec)
       const frames = current.frames.map((item) => item.id === frameId
-        ? syncFrameDuration({ ...item, settings: { ...item.settings, holdDurationSec: item.settings.holdDurationSec + extraHold }, narration: { text: scene.narrationText, voiceId: 'pollinations', audioBuffer, generatedAt: new Date().toISOString() } })
+        ? syncFrameDuration({ ...item, settings: { ...item.settings, holdDurationSec: item.settings.holdDurationSec + extraHold }, narration: { text: scene.narrationText, voiceId: 'pollinations', speed: 1, wordTimestamps: estimateWordTimestamps(scene.narrationText, audioBuffer.duration), audioBuffer, generatedAt: new Date().toISOString() } })
         : item)
       const timeline = buildProjectTimeline({ ...current, frames })
       const startSec = timeline.segments.find((segment) => segment.frameId === frameId)?.startSec ?? 0
@@ -561,14 +562,14 @@ export default function App() {
                 }
               }} style={{ left: `${block.bbox.x / analysis.img.w * 100}%`, top: `${block.bbox.y / analysis.img.h * 100}%`, width: `${block.bbox.w / analysis.img.w * 100}%`, height: `${block.bbox.h / analysis.img.h * 100}%` }}><b>{object ? object.settings.order + 1 : block.id + 1}</b></button>
             })}</div>}
-            {panel === 'subtitle' && !isPlaying && <button type="button" className="subtitle-position-sample" aria-label="Kéo vị trí phụ đề" onPointerDown={dragSubtitleSample} style={{ left: `${project.subtitle.xPct * 100}%`, top: `${project.subtitle.yPct * 100}%`, color: project.subtitle.color, fontFamily: project.subtitle.fontFamily, fontSize: `${Math.max(16, project.subtitle.fontSizePx * .62)}px`, fontWeight: project.subtitle.bold ? 700 : 400, fontStyle: project.subtitle.italic ? 'italic' : 'normal', textDecoration: project.subtitle.underline ? 'underline' : 'none' }}>Đây là tiêu đề mẫu</button>}
+            {project.subtitle.enabled && !isPlaying && <button type="button" className="subtitle-position-sample" aria-label="Kéo vị trí phụ đề" onClick={() => setPanel('subtitle')} onPointerDown={dragSubtitleSample} style={{ left: `${project.subtitle.xPct * 100}%`, top: `${project.subtitle.yPct * 100}%`, color: project.subtitle.color, fontFamily: project.subtitle.fontFamily, fontSize: `${Math.max(16, project.subtitle.fontSizePx * .62)}px`, fontWeight: project.subtitle.bold ? 700 : 400, fontStyle: project.subtitle.italic ? 'italic' : 'normal', textDecoration: project.subtitle.underline ? 'underline' : 'none' }}>Đây là tiêu đề mẫu</button>}
           </div>}
           {!active && <canvas ref={canvasRef} className="render-canvas" aria-label="Canvas xem thử" />}
           {!active && <div className="empty-preview"><strong>Biến ảnh thành câu chuyện được vẽ</strong><p>Tải ảnh của bạn hoặc để AI tạo trọn storyboard tiếng Việt.</p><div className="empty-actions"><button className="export" onClick={() => fileRef.current?.click()}>Tải ảnh lên</button><button className="quiet" onClick={() => openAiDialog()}>Tạo video từ chủ đề…</button></div></div>}
         </div>
         <div className="transport"><div className="transport-left"><button className={`cc-toggle ${project.subtitle.enabled ? 'active' : ''}`} aria-label="Bật tắt phụ đề" aria-pressed={project.subtitle.enabled} onClick={() => updateSubtitle({ enabled: !project.subtitle.enabled })}>CC</button></div><div className="transport-center"><button disabled={isPlaying} onClick={() => setProgress(Math.max(0, progress - 10))}>−10</button><button className="play" disabled={!active} onClick={() => void play(false)}>{isPlaying ? 'Ⅱ' : '▶'}</button><button disabled={isPlaying} onClick={() => setProgress(Math.min(total, progress + 10))}>+10</button></div><span className="duration">{formatTime(progress)} / {formatTime(total)}</span></div>
         <input aria-label="Playhead" className="scrubber range-input" type="range" min="0" max={Math.max(total, 1)} step=".1" value={Math.min(progress, total)} style={{ '--range-progress': `${rangeProgress}%` } as CSSProperties} onChange={(event) => setProgress(Number(event.target.value))} />
-        {active && <NarrationBar frame={active} busy={ttsBusy} progress={ttsProgress} create={(text, voiceId) => void createNarration(text, voiceId)} />}
+        {active && <NarrationBar frame={active} busy={ttsBusy} progress={ttsProgress} create={(text, voiceId, speed) => void createNarration(text, voiceId, speed)} />}
       </section>
       <aside className="inspector spotlight-surface" onPointerMove={handleSpotlight}>
         <nav className="tool-rail"><button className={panel === 'hand' ? 'active' : ''} onClick={() => setPanel('hand')} aria-label="Bàn tay" title="Bàn tay">✎</button>{active && <button className={panel === 'edit' ? 'active' : ''} onClick={() => setPanel('edit')} aria-label="Chỉnh sửa" title="Chỉnh sửa">☷</button>}<button className={panel === 'subtitle' ? 'active' : ''} onClick={() => setPanel('subtitle')} aria-label="Phụ đề" title="Phụ đề">CC</button></nav>

@@ -2,6 +2,8 @@
 import * as ort from 'onnxruntime-web'
 import type { ProgressReporter, TtsResult, Voice } from './types'
 import { resolveVoiceUrl } from './voices'
+import { estimateWordTimestamps } from './wordTimestamps'
+import { phonemizeWithEspeak } from './espeakPhonemizer'
 
 const punctuation = ';:,.!?¡¿—…"«»“” '
 const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
@@ -15,40 +17,62 @@ const arpaToIpa: Record<string, string> = {
   JH: 'dʒ', K: 'k', L: 'l', M: 'm', N: 'n', NG: 'ŋ', P: 'p', R: 'r', S: 's', SH: 'ʃ', T: 't', TH: 'θ', V: 'v', W: 'w', Y: 'j', Z: 'z', ZH: 'ʒ',
 }
 
-let cachedVoiceId = ''
-let cachedSession: ort.InferenceSession | null = null
+const sessionCache = new Map<string, ort.InferenceSession>()
 let cachedDictionaryUrl = ''
 let cachedDictionary: Map<string, string> | null = null
+let cachedSymbolsUrl = ''
+let cachedSymbols: string[] | null = null
 
-export async function synthesize(text: string, voice: Voice, baseUrl: string, report: ProgressReporter): Promise<TtsResult> {
+export async function synthesize(text: string, voice: Voice, baseUrl: string, report: ProgressReporter, speed = 1): Promise<TtsResult> {
   ort.env.wasm.wasmPaths = `${baseUrl}ort/`
   ort.env.wasm.numThreads = 1
   const modelUrl = resolveVoiceUrl(voice.modelUrls.onnx, baseUrl)
-  const dictionaryUrl = resolveVoiceUrl(voice.modelUrls.dictionary, baseUrl)
+  const dictionaryUrl = voice.modelUrls.dictionary ? resolveVoiceUrl(voice.modelUrls.dictionary, baseUrl) : ''
   report({ phase: 'download', percent: 0 })
-  const [session, dictionary] = await Promise.all([
-    cachedVoiceId === voice.id && cachedSession ? cachedSession : createSession(modelUrl, report),
-    cachedDictionaryUrl === dictionaryUrl && cachedDictionary ? cachedDictionary : loadDictionary(dictionaryUrl),
+  const symbolsUrl = voice.modelUrls.symbols ? resolveVoiceUrl(voice.modelUrls.symbols, baseUrl) : ''
+  const [session, dictionary, voiceSymbols] = await Promise.all([
+    getSession(modelUrl, report),
+    dictionaryUrl ? (cachedDictionaryUrl === dictionaryUrl && cachedDictionary ? cachedDictionary : loadDictionary(dictionaryUrl)) : Promise.resolve(new Map<string, string>()),
+    symbolsUrl ? (cachedSymbolsUrl === symbolsUrl && cachedSymbols ? cachedSymbols : loadSymbols(symbolsUrl)) : Promise.resolve(symbols),
   ])
-  cachedSession = session
-  cachedVoiceId = voice.id
   cachedDictionary = dictionary
   cachedDictionaryUrl = dictionaryUrl
+  cachedSymbols = voiceSymbols
+  cachedSymbolsUrl = symbolsUrl
   report({ phase: 'download', percent: 100 })
   report({ phase: 'inference' })
 
-  const phonemes = phonemizeEnglish(text, dictionary)
-  const ids = intersperse([...phonemes].map((symbol) => symbolToId.get(symbol)).filter((id): id is number => id !== undefined))
+  const phonemes = voice.language === 'vi'
+    ? (await phonemizeWithEspeak(text, 'vi', baseUrl)).join('')
+    : phonemizeEnglish(text, dictionary)
+  const voiceSymbolToId = voiceSymbols === symbols ? symbolToId : new Map(voiceSymbols.map((symbol, index) => [symbol, index]))
+  const ids = intersperse([...phonemes].map((symbol) => voiceSymbolToId.get(symbol)).filter((id): id is number => id !== undefined))
   if (ids.length < 3) throw new Error('Nội dung chưa có từ tiếng Anh có thể phát âm.')
   const feeds: Record<string, ort.Tensor> = {
     x: new ort.Tensor('int64', BigInt64Array.from(ids, BigInt), [1, ids.length]),
     x_lengths: new ort.Tensor('int64', BigInt64Array.from([BigInt(ids.length)]), [1]),
-    scales: new ort.Tensor('float32', Float32Array.from([0.667, 0.95]), [2]),
+    scales: new ort.Tensor('float32', Float32Array.from([0.667, 1 / Math.max(.25, Math.min(4, speed))]), [2]),
   }
   const output = await session.run(feeds)
-  const pcm = output.wav?.data
+  let pcm = output.wav?.data
+  if (!(pcm instanceof Float32Array) && output.mel?.data instanceof Float32Array && voice.modelUrls.vocoder) {
+    const vocoderUrl = resolveVoiceUrl(voice.modelUrls.vocoder, baseUrl)
+    const vocoder = await getSession(vocoderUrl, report)
+    const mel = output.mel
+    const vocoderOutput = await vocoder.run({ mel: new ort.Tensor('float32', mel.data, mel.dims) })
+    pcm = vocoderOutput.wav?.data
+  }
   if (!(pcm instanceof Float32Array) || pcm.length === 0) throw new Error('Không tạo được dữ liệu âm thanh cho giọng đã chọn.')
-  return { pcm: new Float32Array(pcm), sampleRate: voice.sampleRate }
+  const result = new Float32Array(pcm)
+  return { pcm: result, sampleRate: voice.sampleRate, wordTimestamps: estimateWordTimestamps(text, result.length / voice.sampleRate) }
+}
+
+async function getSession(url: string, report: ProgressReporter): Promise<ort.InferenceSession> {
+  const existing = sessionCache.get(url)
+  if (existing) return existing
+  const session = await createSession(url, report)
+  sessionCache.set(url, session)
+  return session
 }
 
 async function createSession(url: string, report: ProgressReporter): Promise<ort.InferenceSession> {
@@ -81,6 +105,14 @@ async function loadDictionary(url: string): Promise<Map<string, string>> {
     if (match && !dictionary.has(match[1])) dictionary.set(match[1], match[2])
   }
   return dictionary
+}
+
+async function loadSymbols(url: string): Promise<string[]> {
+  const response = await fetch(url)
+  if (!response.ok) throw new Error('Không tải được bảng ký hiệu của giọng đọc.')
+  const value: unknown = await response.json()
+  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) throw new Error('Bảng ký hiệu giọng đọc không hợp lệ.')
+  return value
 }
 
 export function phonemizeEnglish(text: string, dictionary: Map<string, string>): string {

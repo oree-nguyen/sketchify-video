@@ -11,7 +11,8 @@ export interface SubtitleCue {
  * proportion to each sentence's character count. Replace this function when
  * the synthesizer exposes real word-level timestamps.
  */
-export function buildSubtitleCues(text: string, audioDurationSec: number): SubtitleCue[] {
+export function buildSubtitleCues(text: string, audioDurationSec: number, wordTimestamps: readonly WordTimestamp[] = []): SubtitleCue[] {
+  if (wordTimestamps.length) return groupWordTimestamps(wordTimestamps)
   const parts = (text.replace(/\r\n?/g, '\n').match(/[^.,!?\n]+[.,!?]?/gu) ?? [])
     .map((part) => part.trim())
     .filter(Boolean)
@@ -26,6 +27,23 @@ export function buildSubtitleCues(text: string, audioDurationSec: number): Subti
   })
 }
 
+function groupWordTimestamps(words: readonly WordTimestamp[]): SubtitleCue[] {
+  const cues: SubtitleCue[] = []
+  let group: WordTimestamp[] = []
+  const flush = () => {
+    if (!group.length) return
+    cues.push({ text: group.map((item) => item.word).join(' '), startSec: group[0].startSec, endSec: group[group.length - 1].endSec })
+    group = []
+  }
+  for (const word of words) {
+    group.push(word)
+    if (group.length >= 7 || /[.!?…]$/u.test(word.word)) flush()
+  }
+  flush()
+  return cues
+}
+
 export function subtitleCueAt(cues: readonly SubtitleCue[], timeSec: number): SubtitleCue | undefined {
   return cues.find((cue, index) => timeSec >= cue.startSec && (timeSec < cue.endSec || (index === cues.length - 1 && timeSec <= cue.endSec)))
 }
+import type { WordTimestamp } from '../tts/types'

@@ -1,4 +1,4 @@
-export type TtsEngine = 'piper' | 'matcha'
+export type TtsEngine = 'piper' | 'matcha' | 'vieneu'
 export type TtsLanguage = 'vi' | 'en'
 
 export interface Voice {
@@ -10,11 +10,20 @@ export interface Voice {
   modelUrls: Record<string, string>
   sampleRate: number
   piperId?: string
+  presetVoice?: string
+  usageNotice?: string
+}
+
+export interface WordTimestamp {
+  word: string
+  startSec: number
+  endSec: number
 }
 
 export interface TtsResult {
   pcm: Float32Array
   sampleRate: number
+  wordTimestamps: WordTimestamp[]
 }
 
 export interface TtsProgress {

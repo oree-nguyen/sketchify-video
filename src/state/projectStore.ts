@@ -2,6 +2,7 @@ import { DEFAULT_SETTINGS } from './settingsDefaults'
 import type { PushEdge } from './settingsDefaults'
 import type { Analysis, Block, DrawUnit } from '../wasm/wasmClient'
 import { buildPages } from '../camera/pageZoom'
+import type { WordTimestamp } from '../tts/types'
 
 export type HandStyleId = 'pencil' | 'feather-gray' | 'feather-white' | 'marker' | 'pen-blue'
 export type TransitionType = 'none' | 'zoom-morph' | 'paper-airplane' | 'paper-fold'
@@ -49,6 +50,8 @@ export interface Frame {
 export interface FrameNarration {
   text: string
   voiceId: string
+  speed: number
+  wordTimestamps: WordTimestamp[]
   audioBuffer: AudioBuffer | null
   generatedAt: string
 }

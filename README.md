@@ -46,7 +46,12 @@ Kiểm tra model tiếng Anh qua runtime web thật:
 
 ```bash
 npm run test:matcha-web
+npm run test:matcha-ngoc-ngan-web
+npm run test:vieneu-heads-web
+npm run test:new-tts-browser
 ```
+
+Giọng đọc hỗ trợ tốc độ thập phân từ `0.25×` đến `4.0×`. Timestamp cấp từ được sinh sau suy luận theo đúng thời lượng PCM thực tế và lưu cùng Frame; đây là ước lượng theo trọng số ký tự/dấu câu vì các checkpoint hiện tại không xuất forced-alignment cấp từ. Phụ đề dùng timestamp này, còn khung mẫu kéo-thả luôn hiện khi bật CC và chưa chạy preview.
 
 Xem nguồn và license của model/runtime tại [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 

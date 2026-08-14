@@ -7,7 +7,7 @@ interface Props {
   frame: Frame
   busy: boolean
   progress: TtsProgress | null
-  create: (text: string, voiceId: string) => void
+  create: (text: string, voiceId: string, speed: number) => void
 }
 
 export function NarrationBar({ frame, busy, progress, create }: Props) {
@@ -16,6 +16,7 @@ export function NarrationBar({ frame, busy, progress, create }: Props) {
   const savedVoice = (() => { try { return voiceById(savedVoiceId) } catch { return voiceById(DEFAULT_VOICE_BY_LANGUAGE.vi) } })()
   const [language, setLanguage] = useState<TtsLanguage>(savedVoice.language)
   const [voiceId, setVoiceId] = useState(savedVoice.id)
+  const [speed, setSpeed] = useState(frame.narration?.speed ?? 1)
   useEffect(() => {
     setText(frame.narration?.text ?? '')
     let voice
@@ -23,8 +24,10 @@ export function NarrationBar({ frame, busy, progress, create }: Props) {
     catch { voice = voiceById(DEFAULT_VOICE_BY_LANGUAGE.vi) }
     setLanguage(voice.language)
     setVoiceId(voice.id)
+    setSpeed(frame.narration?.speed ?? 1)
   }, [frame.id, frame.narration?.generatedAt])
   const voices = TTS_VOICES.filter((voice) => voice.language === language)
+  const selectedVoice = voices.find((voice) => voice.id === voiceId)
   const status = progress?.phase === 'download' ? `Đang tải giọng đọc... ${progress.percent ?? 0}%` : progress?.phase === 'inference' ? 'Đang tạo giọng nói...' : null
   return <div className="narration-bar">
     <textarea aria-label="Lời thoại khung hình" placeholder="Nhập lời thoại cho khung hình này..." value={text} onChange={(event) => setText(event.target.value)} />
@@ -35,7 +38,9 @@ export function NarrationBar({ frame, busy, progress, create }: Props) {
         setVoiceId(DEFAULT_VOICE_BY_LANGUAGE[nextLanguage])
       }}><option value="vi">Tiếng Việt</option><option value="en">English</option></select>
       <select aria-label="Giọng đọc" value={voiceId} onChange={(event) => setVoiceId(event.target.value)}>{voices.map((voice) => <option key={voice.id} value={voice.id}>{voice.displayName}</option>)}</select>
-      <button className="export" disabled={busy || !text.trim()} onClick={() => create(text, voiceId)}>{busy ? status : frame.narration?.audioBuffer ? 'Tạo lại audio' : 'Tạo audio ▶'}</button>
+      <label className="speech-speed">Tốc độ <input aria-label="Tốc độ giọng đọc" type="number" min="0.25" max="4" step="0.1" inputMode="decimal" value={speed} onChange={(event) => setSpeed(Math.max(.25, Math.min(4, Number(event.target.value) || 1)))} /><span>×</span></label>
+      <button className="export" disabled={busy || !text.trim()} onClick={() => create(text, voiceId, speed)}>{busy ? status : frame.narration?.audioBuffer ? 'Tạo lại audio' : 'Tạo audio ▶'}</button>
+      {selectedVoice?.usageNotice && <small className="voice-usage-notice">{selectedVoice.usageNotice}</small>}
     </div>
     {frame.narration?.audioBuffer && <AudioPreview buffer={frame.narration.audioBuffer} />}
   </div>

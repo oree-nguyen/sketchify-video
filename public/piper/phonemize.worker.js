@@ -1,6 +1,6 @@
 /* global createPiperPhonemize */
 self.onmessage = async (event) => {
-  const { text, config, scriptUrl, wasmUrl, dataUrl } = event.data
+  const { text, config, voice, scriptUrl, wasmUrl, dataUrl } = event.data
   try {
     importScripts(scriptUrl)
     const result = await new Promise(async (resolve, reject) => {
@@ -10,9 +10,9 @@ self.onmessage = async (event) => {
           if (finished) return
           try {
             const output = JSON.parse(line)
-            const ids = phonemesToIds(output.phonemes ?? [], config)
+            const phonemes = output.phonemes ?? []
             finished = true
-            resolve(ids)
+            resolve(config ? { ids: phonemesToIds(phonemes, config) } : { phonemes })
           } catch (error) {
             reject(error)
           }
@@ -21,12 +21,12 @@ self.onmessage = async (event) => {
         locateFile: (url) => url.endsWith('.wasm') ? wasmUrl : url.endsWith('.data') ? dataUrl : url,
       })
       module.callMain([
-        '-l', config.espeak.voice,
+        '-l', config?.espeak?.voice ?? voice ?? 'en-us',
         '--input', JSON.stringify([{ text: String(text).trim() }]),
         '--espeak_data', '/espeak-ng-data',
       ])
     })
-    self.postMessage({ ids: result })
+    self.postMessage(result)
   } catch (error) {
     self.postMessage({ error: error instanceof Error ? error.message : 'Không thể xử lý phát âm.' })
   }

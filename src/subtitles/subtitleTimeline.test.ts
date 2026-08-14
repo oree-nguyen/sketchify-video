@@ -16,4 +16,16 @@ describe('subtitle fallback timing', () => {
     expect(subtitleCueAt(cues, 9.9)?.text).toBe('Một câu dài hơn nhiều!')
     expect(subtitleCueAt(cues, 10.1)).toBeUndefined()
   })
+
+  it('uses generated word timestamps when the synthesizer supplies them', () => {
+    const cues = buildSubtitleCues('ignored fallback text', 99, [
+      { word: 'Xin', startSec: 0, endSec: .4 },
+      { word: 'chào.', startSec: .4, endSec: 1 },
+      { word: 'Bạn', startSec: 1, endSec: 1.4 },
+    ])
+    expect(cues).toEqual([
+      { text: 'Xin chào.', startSec: 0, endSec: 1 },
+      { text: 'Bạn', startSec: 1, endSec: 1.4 },
+    ])
+  })
 })

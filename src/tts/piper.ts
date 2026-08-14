@@ -2,6 +2,7 @@
 import * as ort from 'onnxruntime-web'
 import type { ProgressReporter, TtsResult, Voice } from './types'
 import { resolveVoiceUrl } from './voices'
+import { estimateWordTimestamps } from './wordTimestamps'
 
 interface PiperConfig {
   audio: { sample_rate: number }
@@ -17,7 +18,7 @@ interface PiperConfig {
 const sessions = new Map<string, ort.InferenceSession>()
 const configs = new Map<string, PiperConfig>()
 
-export async function synthesize(text: string, voice: Voice, baseUrl: string, report: ProgressReporter): Promise<TtsResult> {
+export async function synthesize(text: string, voice: Voice, baseUrl: string, report: ProgressReporter, speed = 1): Promise<TtsResult> {
   ort.env.wasm.wasmPaths = `${baseUrl}ort/`
   ort.env.wasm.numThreads = 1
   const configUrl = resolveVoiceUrl(voice.modelUrls.config, baseUrl)
@@ -38,7 +39,7 @@ export async function synthesize(text: string, voice: Voice, baseUrl: string, re
     input_lengths: new ort.Tensor('int64', BigInt64Array.from([BigInt(ids.length)]), [1]),
     scales: new ort.Tensor('float32', Float32Array.from([
       config.inference.noise_scale,
-      config.inference.length_scale,
+      config.inference.length_scale / Math.max(.25, Math.min(4, speed)),
       config.inference.noise_w,
     ]), [3]),
   }
@@ -46,7 +47,8 @@ export async function synthesize(text: string, voice: Voice, baseUrl: string, re
   const output = await session.run(feeds)
   const pcm = output.output?.data
   if (!(pcm instanceof Float32Array) || pcm.length === 0) throw new Error('Không tạo được dữ liệu âm thanh cho giọng đã chọn.')
-  return { pcm: new Float32Array(pcm), sampleRate: config.audio.sample_rate }
+  const result = new Float32Array(pcm)
+  return { pcm: result, sampleRate: config.audio.sample_rate, wordTimestamps: estimateWordTimestamps(text, result.length / config.audio.sample_rate) }
 }
 
 async function fetchConfig(url: string): Promise<PiperConfig> {

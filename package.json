@@ -22,6 +22,9 @@
     "test:session-browser": "node scripts/cdp-session-e2e.mjs",
     "test:subtitle-browser": "node scripts/cdp-subtitle-e2e.mjs",
     "test:matcha-web": "node scripts/probe-matcha-ort-web.mjs",
+    "test:matcha-ngoc-ngan-web": "node scripts/probe-matcha-ngoc-ngan-web.mjs",
+    "test:vieneu-heads-web": "node scripts/probe-vieneu-heads-web.mjs",
+    "test:new-tts-browser": "node scripts/cdp-new-vietnamese-tts-e2e.mjs",
     "test:tts-browser": "node scripts/cdp-tts-matcha-overlay-e2e.mjs",
     "test:tts-vi-browser": "node scripts/cdp-tts-vietnamese-voices-e2e.mjs",
     "test:piper-vi-web": "node scripts/probe-piper-vi-ort-web.mjs",
@@ -29,7 +32,7 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
-    "onnxruntime-web": "^1.18.0",
+    "onnxruntime-web": "^1.27.0",
     "react": "latest",
     "react-dom": "latest",
     "typescript": "latest",

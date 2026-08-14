@@ -20,9 +20,49 @@ const piper = (path: string, file: string) => ({
   config: `${piperRoot}/${path}/${file}.onnx.json?download=true`,
 })
 
+const vieneuRevision = '75ff82a72f54d55ed389e1eeb12041d3c4bac7d4'
+const vieneuModelUrls = {
+  prefill: 'voices/vieneu-v3/runtime/vieneu_prefill.onnx',
+  decode: 'voices/vieneu-v3/runtime/vieneu_decode_step.onnx',
+  acoustic: 'voices/vieneu-v3/runtime/vieneu_acoustic_cached.onnx',
+  backbone0: 'voices/vieneu-v3/runtime/vieneu-backbone-0.data',
+  backbone1: 'voices/vieneu-v3/runtime/vieneu-backbone-1.data',
+  codec: 'voices/vieneu-v3/runtime/moss_audio_tokenizer_decode_full.onnx',
+  codecData: 'voices/vieneu-v3/runtime/moss_audio_tokenizer_decode_shared.data',
+  embed: 'voices/vieneu-v3/embed.onnx',
+  heads: 'voices/vieneu-v3/heads.onnx',
+  tokenizer: 'voices/vieneu-v3/tokenizer.json',
+  presets: 'voices/vieneu-v3/voices.json',
+}
+const vieneuVoice = (id: string, displayName: string, presetVoice: string): Voice => ({
+  id, displayName, presetVoice, language: 'vi', engine: 'vieneu', sampleRate: 48000,
+  sourceCheckpoint: `pnnbao-ump/VieNeu-TTS-v3-Turbo@${vieneuRevision}`,
+  modelUrls: vieneuModelUrls,
+})
+
 // Only displayName and language are exposed by the UI. Engine/checkpoint/model
 // information remains internal and is documented in THIRD-PARTY-NOTICES.md.
 export const TTS_VOICES: Voice[] = [
+  {
+    id: 'vi-mc-ngoc-ngan', displayName: 'MC. Ngọc Ngân', language: 'vi', engine: 'matcha',
+    sourceCheckpoint: 'doof-ferb/matcha_ngngngan checkpoint_epoch420_slim', sampleRate: 22050,
+    modelUrls: {
+      onnx: 'voices/matcha-ngoc-ngan.onnx',
+      vocoder: 'voices/hifigan-ngoc-ngan.onnx',
+      symbols: 'voices/matcha-ngoc-ngan-symbols.json',
+    },
+    usageNotice: 'Giọng này chỉ được dùng phi thương mại theo giấy phép CC BY-NC-SA 4.0 của checkpoint.',
+  },
+  vieneuVoice('vi-vieneu-ngoc-lan', 'Ngọc Lan', 'Ngọc Lan'),
+  vieneuVoice('vi-vieneu-ngoc-linh', 'Ngọc Linh', 'Ngọc Linh'),
+  vieneuVoice('vi-vieneu-truc-ly', 'Trúc Ly', 'Trúc Ly'),
+  vieneuVoice('vi-vieneu-my-duyen', 'Mỹ Duyên', 'Mỹ Duyên'),
+  vieneuVoice('vi-vieneu-xuan-vinh', 'Xuân Vĩnh', 'Xuân Vĩnh'),
+  vieneuVoice('vi-vieneu-thai-son', 'Thái Sơn', 'Thái Sơn'),
+  vieneuVoice('vi-vieneu-gia-bao', 'Gia Bảo', 'Gia Bảo'),
+  vieneuVoice('vi-vieneu-duc-tri', 'Đức Trí', 'Đức Trí'),
+  vieneuVoice('vi-vieneu-trong-huu', 'Trọng Hữu', 'Trọng Hữu'),
+  vieneuVoice('vi-vieneu-binh-an', 'Bình An', 'Bình An'),
   {
     id: 'vi-default', displayName: 'Giọng Việt tiêu chuẩn', language: 'vi', engine: 'piper',
     sourceCheckpoint: 'vi_VN-vais1000-medium', piperId: 'vi_VN-vais1000-medium', sampleRate: 22050,

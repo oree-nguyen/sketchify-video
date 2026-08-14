@@ -70,7 +70,7 @@ export class ProjectPlayer {
       const holdDuration = Math.max(0, playableDuration - drawDuration - pauseDuration)
       const globalStart = segment.startSec + previousHalf
       const subtitleCues = frame.narration?.audioBuffer
-        ? buildSubtitleCues(frame.narration.text, frame.narration.audioBuffer.duration)
+        ? buildSubtitleCues(frame.narration.text, frame.narration.audioBuffer.duration, frame.narration.wordTimestamps)
         : []
 
       const player = new Player(this.canvas, {
@@ -174,7 +174,7 @@ function drawProjectSubtitleAt(context: CanvasRenderingContext2D, project: Proje
   const frame = project.frames[segment.frameIndex]
   const narration = frame.narration
   if (!narration?.audioBuffer) return
-  const cues = buildSubtitleCues(narration.text, narration.audioBuffer.duration)
+  const cues = buildSubtitleCues(narration.text, narration.audioBuffer.duration, narration.wordTimestamps)
   drawSubtitleOverlay(context, project.subtitle, { cues }, globalTimeSec - segment.startSec)
 }
 

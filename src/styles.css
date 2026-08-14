@@ -305,6 +305,9 @@ button:disabled { opacity: .45; }
 .narration-bar textarea:focus { border-color: var(--accent); box-shadow: 0 0 14px #84cc1635; }
 .narration-actions { display: grid; grid-template-columns: minmax(0, .7fr) minmax(0, 1.3fr); gap: 7px; }
 .narration-actions select { min-width: 0; border: 1px solid #34434f; border-radius: 7px; padding: 7px; background: #101820; color: #d9e2e9; }
+.speech-speed { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 72px 12px; align-items: center; gap: 6px; color: #aab6c0; font-size: 11px; }
+.speech-speed input { width: 100%; border: 1px solid #34434f; border-radius: 7px; padding: 7px; background: #101820; color: var(--accent-strong); font: inherit; }
+.voice-usage-notice { grid-column: 1 / -1; color: #fbbf24; line-height: 1.35; }
 .narration-actions button { grid-column: 1 / -1; }
 .narration-preview { grid-column: 1 / -1; display: flex; align-items: center; gap: 9px; color: var(--accent-strong); font-size: 10px; }
 .waveform { height: 25px; flex: 1 1 auto; display: flex; align-items: center; gap: 2px; }
