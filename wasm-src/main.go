@@ -42,7 +42,7 @@ func analyzeJS(_ js.Value, args []js.Value) interface{} {
 		}
 		jsUnits[i] = map[string]interface{}{"type": u.Type, "blockId": u.BlockID, "bbox": rectJS(u.BBox), "pixels": intsJS(u.Pixels), "path": floatsJS(path), "color": intsJS([]int{u.Color.R, u.Color.G, u.Color.B}), "cost": u.Cost, "t0": u.T0, "t1": u.T1}
 	}
-	return map[string]interface{}{"img": map[string]interface{}{"rgba": bytesJS(rgba), "gray": bytesJS(Gray(rgba)), "ink": bytesJS(InkMask(rgba, width, height, settings, result.Background)), "w": width, "h": height, "bg": intsJS([]int{result.Background.R, result.Background.G, result.Background.B})}, "blocks": blocks, "units": jsUnits, "stats": map[string]interface{}{"blocks": len(blocks), "units": len(units), "mergeRadiusConfigured": settings.MergeRadius, "mergeRadiusApplied": result.EffectiveMergeRadius, "workingWidthActual": width, "openingApplied": result.OpeningApplied}}
+	return map[string]interface{}{"img": map[string]interface{}{"rgba": bytesJS(rgba), "gray": bytesJS(Gray(rgba)), "ink": bytesJS(result.Ink), "saliency": bytesJS(result.Saliency), "w": width, "h": height, "bg": intsJS([]int{result.Background.R, result.Background.G, result.Background.B})}, "blocks": blocks, "units": jsUnits, "stats": map[string]interface{}{"blocks": len(blocks), "units": len(units), "mergeRadiusConfigured": settings.MergeRadius, "mergeRadiusApplied": result.EffectiveMergeRadius, "workingWidthActual": width, "openingApplied": result.OpeningApplied, "segmentationMode": result.SegmentationMode, "backgroundVariance": result.BackgroundVariance, "backgroundEntropy": result.BackgroundEntropy, "saliencyThreshold": result.SaliencyThreshold}}
 }
 
 func rectJS(r Rect) map[string]interface{} {
@@ -118,6 +118,18 @@ func settingsFromJS(v js.Value) Settings {
 				s.CustomOrder = append(s.CustomOrder, n.Index(i).Int())
 			}
 		}
+	}
+	if n := v.Get("segmentationMode"); n.Type() == js.TypeString {
+		s.SegmentationMode = n.String()
+	}
+	if n := v.Get("bgVarianceThreshold"); n.Type() == js.TypeNumber {
+		s.BGVarianceThreshold = n.Float()
+	}
+	if n := v.Get("bgEntropyThreshold"); n.Type() == js.TypeNumber {
+		s.BGEntropyThreshold = n.Float()
+	}
+	if n := v.Get("saliencyPercentile"); n.Type() == js.TypeNumber {
+		s.SaliencyPercentile = n.Float()
 	}
 	return s
 }

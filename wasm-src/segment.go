@@ -16,6 +16,11 @@ type AnalysisResult struct {
 	Blocks               []Block
 	EffectiveMergeRadius int
 	OpeningApplied       bool
+	Ink, Saliency        []uint8
+	SegmentationMode     string
+	BackgroundVariance   float64
+	BackgroundEntropy    float64
+	SaliencyThreshold    uint8
 }
 
 // Components dùng flood-fill stack 4-láng giềng, không đệ quy để tránh tràn stack.
@@ -65,12 +70,49 @@ func Components(mask []uint8, w, h int) ([]int, [][]int) {
 func Analyze(rgba []byte, w, h int, s Settings) AnalysisResult {
 	bg := EstimateBackground(rgba, w, h)
 	fine := InkMask(rgba, w, h, s, bg)
+	variance, entropy := BackgroundComplexity(rgba, w, h)
+	mode := s.SegmentationMode
+	if mode != "standard" && mode != "saliency" {
+		if variance < s.BGVarianceThreshold && entropy < s.BGEntropyThreshold {
+			mode = "standard"
+		} else {
+			mode = "saliency"
+		}
+	}
+	var saliency []uint8
+	var saliencyThreshold uint8
+	if mode == "saliency" {
+		saliency = SpectralResidualSaliency(Gray(rgba), w, h)
+		saliencyThreshold = PercentileThreshold(saliency, s.SaliencyPercentile)
+		// Với nền phức tạp, thành phần "khác một màu nền viền" của InkMask cũ gần
+		// như phủ toàn ảnh. OR trực tiếp thành phần đó với saliency sẽ tạo một Block
+		// khổng lồ. Giữ nhánh Sobel ổn định của mask cũ rồi dùng saliency bổ sung
+		// phần đặc bên trong vùng nổi bật; nhánh nền đơn giản phía trên không đổi.
+		edges := SobelMagnitude(Gray(rgba), w, h)
+		supportThreshold := PercentileThreshold(saliency, mathMax(45, s.SaliencyPercentile-30))
+		for i := range fine {
+			fine[i] = 0
+			if saliency[i] > saliencyThreshold || (saliency[i] > supportThreshold && int(edges[i]) > s.EdgeThreshold) {
+				fine[i] = 1
+			}
+		}
+	}
 	fine = DilateSquare(ErodeSquare(fine, w, h, 1), w, h, 1)
 	// rgba đã được resize về ảnh làm việc trước khi vào WASM. Scale bán kính theo
 	// chiều rộng THỰC của ảnh này; dùng s.WorkingWidth ở đây sẽ áp 14px cả cho
 	// ảnh 480px và vô tình nối các vật thể cách nhau chỉ vài pixel.
 	r := effectiveMergeRadius(s.MergeRadius, w)
-	dilated := DilateSquare(fine, w, h, r)
+	linkRadius := r
+	if mode == "saliency" {
+		// Chỉ nối các hạt saliency ở tỉ lệ nhỏ; pixel dilation không được đưa vào
+		// Block, nó chỉ hỗ trợ nhãn CCL giống cơ chế merge hiện có.
+		saliencyLinkRadius := maxInt(1, w/480)
+		if variance >= s.BGVarianceThreshold*3 {
+			saliencyLinkRadius = maxInt(saliencyLinkRadius, maxInt(1, w/320))
+		}
+		linkRadius = maxInt(linkRadius, saliencyLinkRadius)
+	}
+	dilated := DilateSquare(fine, w, h, linkRadius)
 	labels, _ := Components(dilated, w, h)
 	blocks := map[int]*Block{}
 	for p, on := range fine {
@@ -110,6 +152,9 @@ func Analyze(rgba []byte, w, h int, s Settings) AnalysisResult {
 		b.Kind = ClassifyBlock(rgba, w, *b, s)
 		out = append(out, *b)
 	}
+	if mode == "saliency" {
+		out = SplitOversizedSaliencyBlocks(out, rgba, w, h, s)
+	}
 	out = MergeTextBlocks(out, rgba, w, h)
 	filtered := out[:0]
 	for i := range out {
@@ -123,7 +168,14 @@ func Analyze(rgba []byte, w, h int, s Settings) AnalysisResult {
 	for i := range out {
 		out[i].ID = i
 	}
-	return AnalysisResult{Background: bg, Blocks: out, EffectiveMergeRadius: r, OpeningApplied: true}
+	return AnalysisResult{Background: bg, Blocks: out, EffectiveMergeRadius: r, OpeningApplied: true, Ink: fine, Saliency: saliency, SegmentationMode: mode, BackgroundVariance: variance, BackgroundEntropy: entropy, SaliencyThreshold: saliencyThreshold}
+}
+
+func mathMax(a, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // MergeTextBlocks gom dấu -> ký tự rồi gom các ký tự/từ trên cùng baseline.

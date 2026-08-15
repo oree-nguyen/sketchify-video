@@ -10,7 +10,7 @@ import { beginPollinationsAuth, consumeAuthCallbackResult, disconnectPollination
 import { generateImage as pollinationsGenerateImage, generateSpeech, generateStoryScript } from './ai/pollinationsClient'
 import type { StoryProgress, StoryScene, StorySceneFailure } from './ai/types'
 import { ProjectPlayer } from './render/ProjectPlayer'
-import { createEmptyProject, createFrame, createFrameFromSource, frameDrawDurationSec, mergeFrameObjects, objectDropInsertionIndex, reconcileFrameObjects, setFrameCamera, setFrameCameraPinned, setFrameHold, setFramePageZoom, setFramePauseSettings, setFrameTransition, setObjectDuration, setObjectEffect, setObjectOrder, setObjectPush, setObjectZoomFollow, syncFrameDuration, ungroupFrameObject, type AudioClip, type Frame, type ObjectSettings, type Project, type SubtitleSettings } from './state/projectStore'
+import { applyBlockOverridesToAnalysis, createEmptyProject, createFrame, createFrameFromSource, frameDrawDurationSec, mergeFrameObjects, objectDropInsertionIndex, reconcileFrameObjects, replaceFrameObjectWithRescan, setFrameCamera, setFrameCameraPinned, setFrameHold, setFramePageZoom, setFramePauseSettings, setFrameTransition, setObjectDuration, setObjectEffect, setObjectOrder, setObjectPush, setObjectZoomFollow, syncFrameDuration, translateLocalAnalysis, ungroupFrameObject, type AudioClip, type BlockOverrides, type Frame, type ObjectSettings, type Project, type SubtitleSettings } from './state/projectStore'
 import type { FrameSettings } from './state/settingsDefaults'
 import { buildProjectTimeline } from './timeline/projectTimeline'
 import { analyzeImage, type Analysis } from './wasm/wasmClient'
@@ -114,7 +114,7 @@ export default function App() {
     return () => window.clearTimeout(timeout)
   }, [sessionReady, activeSessionId, activeSessionName, activeSessionCreatedAt, project.frames, project.activeFrameId, project.handStyle, project.audioClips, project.subtitle])
 
-  const inspect = async (frameId: number, url: string, settings: FrameSettings): Promise<Analysis | null> => {
+  const inspect = async (frameId: number, url: string, settings: FrameSettings, blockOverrides?: BlockOverrides): Promise<Analysis | null> => {
     setAnalysisStatus('working')
     try {
       console.log('[Sketchify] analyzeFrame start', { frameId })
@@ -126,7 +126,8 @@ export default function App() {
       if (!context) throw new Error('Không tạo được Canvas2D')
       context.drawImage(image, 0, 0, canvas.width, canvas.height)
       const rgba = new Uint8Array(context.getImageData(0, 0, canvas.width, canvas.height).data)
-      const result = await analyzeImage(rgba, canvas.width, canvas.height, { ...settings, mergeRadius: 0 } as unknown as Record<string, number>)
+      const wasmResult = await analyzeImage(rgba, canvas.width, canvas.height, { ...settings, mergeRadius: 0 } as unknown as Record<string, unknown>)
+      const result = applyBlockOverridesToAnalysis(wasmResult, blockOverrides)
       setAnalyses((current) => ({ ...current, [frameId]: result }))
       setProject((current) => ({
         ...current,
@@ -172,7 +173,7 @@ export default function App() {
 
   useEffect(() => {
     if (!active?.dirty) return
-    const timeout = window.setTimeout(() => void inspect(active.id, active.sourceUrl, active.settings), 120)
+    const timeout = window.setTimeout(() => void inspect(active.id, active.sourceUrl, active.settings, active.blockOverrides), 120)
     return () => window.clearTimeout(timeout)
   }, [active?.id, active?.dirty, active?.sourceUrl])
 
@@ -206,6 +207,11 @@ export default function App() {
       }
       next = setFrameCameraPinned(next, frameId, patch.cameraPinned)
     }
+    const analysisPatch: Partial<FrameSettings> = {}
+    for (const key of ['segmentationMode', 'bgVarianceThreshold', 'bgEntropyThreshold', 'saliencyPercentile', 'localRescanPaddingPct'] as const) {
+      if (patch[key] !== undefined) Object.assign(analysisPatch, { [key]: patch[key] })
+    }
+    if (Object.keys(analysisPatch).length) next = { ...next, frames: next.frames.map((frame) => frame.id === frameId ? { ...frame, settings: { ...frame.settings, ...analysisPatch, mergeRadius: 0 }, dirty: true } : frame) }
     return next
   })
 
@@ -273,6 +279,51 @@ export default function App() {
     setAnalyses((current) => ({ ...current, [active.id]: result.analysis }))
     setProject((current) => ({ ...current, frames: current.frames.map((frame) => frame.id === active.id ? result.frame : frame) }))
     setSelectedObjectId(result.objectIds[0] ?? null); setSelectedObjectIds(result.objectIds)
+  }
+
+  const rescanObject = async (objectId: string) => {
+    if (!active || !analysis || analysisStatus === 'working') return
+    const object = active.objects.find((candidate) => candidate.objectId === objectId)
+    if (!object) return
+    setAnalysisStatus('working')
+    try {
+      const padding = Math.max(0, active.settings.localRescanPaddingPct) / 100
+      const extraX = Math.round(object.bbox.w * padding), extraY = Math.round(object.bbox.h * padding)
+      const x = Math.max(0, object.bbox.x - extraX), y = Math.max(0, object.bbox.y - extraY)
+      const right = Math.min(analysis.img.w, object.bbox.x + object.bbox.w + extraX)
+      const bottom = Math.min(analysis.img.h, object.bbox.y + object.bbox.h + extraY)
+      const width = right - x, height = bottom - y
+      const crop = new Uint8Array(width * height * 4)
+      for (let row = 0; row < height; row++) {
+        crop.set(analysis.img.rgba.subarray(((y + row) * analysis.img.w + x) * 4, ((y + row) * analysis.img.w + right) * 4), row * width * 4)
+      }
+      const local = await analyzeImage(crop, width, height, { ...active.settings, segmentationMode: 'saliency', mergeRadius: 0 } as unknown as Record<string, unknown>)
+      const sourceInCrop = { x: object.bbox.x - x, y: object.bbox.y - y, w: object.bbox.w, h: object.bbox.h }
+      const significant = local.blocks.filter((block) => {
+        const overlapW = Math.max(0, Math.min(block.bbox.x + block.bbox.w, sourceInCrop.x + sourceInCrop.w) - Math.max(block.bbox.x, sourceInCrop.x))
+        const overlapH = Math.max(0, Math.min(block.bbox.y + block.bbox.h, sourceInCrop.y + sourceInCrop.h) - Math.max(block.bbox.y, sourceInCrop.y))
+        return block.inkArea >= active.settings.minBlockInk && overlapW * overlapH > 0
+      })
+      if (significant.length < 2) {
+        window.alert('Không tách được tự động, vui lòng dùng Khoanh vùng tự do (lasso) để vẽ tay ranh giới.')
+        return
+      }
+      const acceptedIds = new Set(significant.map((block) => block.id))
+      const localAccepted = { ...local, blocks: significant, units: local.units.filter((unit) => acceptedIds.has(unit.blockId)) }
+      const firstId = Math.max(-1, ...analysis.blocks.map((block) => block.id)) + 1
+      const translated = translateLocalAnalysis(localAccepted, x, y, analysis.img.w, firstId)
+      const replacement = replaceFrameObjectWithRescan(active, analysis, objectId, translated)
+      if (!replacement) {
+        window.alert('Không tách được tự động, vui lòng dùng Khoanh vùng tự do (lasso) để vẽ tay ranh giới.')
+        return
+      }
+      setAnalyses((current) => ({ ...current, [active.id]: replacement.analysis }))
+      setProject((current) => ({ ...current, frames: current.frames.map((frame) => frame.id === active.id ? replacement.frame : frame) }))
+      setSelectedObjectIds(replacement.objectIds); setSelectedObjectId(replacement.objectIds[0] ?? null)
+    } catch (error) {
+      console.error('[Sketchify] local saliency rescan failed', error)
+      window.alert(`Quét lại cục bộ thất bại: ${errorMessage(error)}`)
+    } finally { setAnalysisStatus('idle') }
   }
 
   const createNarration = async (text: string, voiceId: string, speed: number) => {
@@ -589,7 +640,7 @@ export default function App() {
     <section className="workspace">
           <FramePanel frames={project.frames} activeId={active?.id} select={selectFrame} upload={() => fileRef.current?.click()} create={() => openAiDialog()} regenerate={(frame) => void regenerateFrame(frame)} remove={(frame) => removeFrameById(frame.id)} drop={handleDrop} connectPollinations={connectPollinations} onPointerMove={handleSpotlight} />
       <section className="stage spotlight-surface" onPointerMove={handleSpotlight}>
-        <div className="stage-topline"><span>{active ? `KHUNG ${project.frames.findIndex((frame) => frame.id === active.id) + 1}` : 'SẴN SÀNG'}</span><span className="stage-diagnostics">{analysis && !showRender && <button className={`mask-toggle ${showInkMask ? 'active' : ''}`} type="button" aria-pressed={showInkMask} onClick={() => setShowInkMask((value) => !value)}>Ink mask</button>}<span>{analysisStatus === 'working' ? 'Đang phân tích bằng WASM…' : analysis ? `${analysis.blocks.length} vật thể đã tách` : analysisStatus === 'error' ? 'Không thể phân tích ảnh' : 'Thêm ảnh để bắt đầu'}</span></span></div>
+        <div className="stage-topline"><span>{active ? `KHUNG ${project.frames.findIndex((frame) => frame.id === active.id) + 1}` : 'SẴN SÀNG'}</span><span className="stage-diagnostics">{analysis && !showRender && <button className={`mask-toggle ${showInkMask ? 'active' : ''}`} type="button" aria-pressed={showInkMask} onClick={() => setShowInkMask((value) => !value)}>Ink mask</button>}{active && analysis && <select className="algorithm-mode" aria-label="Chế độ tách vật thể" value={active.settings.segmentationMode} onChange={(event) => updateFrameSettings({ segmentationMode: event.target.value as FrameSettings['segmentationMode'] })}><option value="auto">Tự động</option><option value="standard">Thuật toán chuẩn</option><option value="saliency">Thuật toán saliency</option></select>}<span>{analysisStatus === 'working' ? 'Đang phân tích bằng WASM…' : analysis ? <>{analysis.blocks.length} vật thể đã tách <small className="algorithm-status">· {analysis.stats.segmentationMode === 'saliency' ? 'Nền phức tạp · thuật toán saliency' : 'Nền đơn giản · thuật toán chuẩn'}</small></> : analysisStatus === 'error' ? 'Không thể phân tích ảnh' : 'Thêm ảnh để bắt đầu'}</span></span></div>
         <div className={`preview ${showRender ? 'has-render' : ''} ${isPlaying ? 'is-playing' : ''}`}>
           {active && <div className="analyzed-image">
             <canvas ref={canvasRef} className="render-canvas" aria-label="Canvas xem thử" />
@@ -621,7 +672,7 @@ export default function App() {
           ? <SubtitlePanel settings={project.subtitle} update={updateSubtitle} />
           : panel === 'hand' || !active
           ? <HandPanel style={project.handStyle} setStyle={(handStyle) => setProject((current) => ({ ...current, handStyle }))} />
-          : <EditPanel frame={active} analysis={analysis} last={project.frames.at(-1)?.id === active.id} scope={editScope} setScope={setEditScope} selectedObjectId={selectedObjectId} selectedObjectIds={selectedObjectIds} selectObject={selectOnlyObject} toggleObjectSelection={toggleObjectSelection} groupSelectedObjects={groupSelectedObjects} ungroupObject={ungroupObject} updateFrameSettings={updateFrameSettings} updateTransition={updateTransition} updateObject={updateObject} reorderObject={reorderObject} setObjectOrderDirect={setObjectOrderDirect} audioClip={project.audioClips.find((clip) => clip.frameId === active.id)} removeAudio={removeActiveAudio} removeFrame={removeActiveFrame} />}
+          : <EditPanel frame={active} analysis={analysis} last={project.frames.at(-1)?.id === active.id} scope={editScope} setScope={setEditScope} selectedObjectId={selectedObjectId} selectedObjectIds={selectedObjectIds} selectObject={selectOnlyObject} toggleObjectSelection={toggleObjectSelection} groupSelectedObjects={groupSelectedObjects} ungroupObject={ungroupObject} rescanObject={(objectId) => void rescanObject(objectId)} updateFrameSettings={updateFrameSettings} updateTransition={updateTransition} updateObject={updateObject} reorderObject={reorderObject} setObjectOrderDirect={setObjectOrderDirect} audioClip={project.audioClips.find((clip) => clip.frameId === active.id)} removeAudio={removeActiveAudio} removeFrame={removeActiveFrame} />}
         </div>
       </aside>
     </section>

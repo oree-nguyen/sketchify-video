@@ -35,6 +35,15 @@ export interface FrameObject {
   groupUnitsByMember?: Record<string, DrawUnit[]>
 }
 
+export interface BlockSplitOverride {
+  sourceBBox: Block['bbox']
+  method: 'saliency-rescan'
+  blocks: Block[]
+  units: DrawUnit[]
+}
+
+export interface BlockOverrides { splits: BlockSplitOverride[] }
+
 export interface Frame {
   id: number
   name: string
@@ -48,6 +57,7 @@ export interface Frame {
   imageSource: 'upload' | 'ai-generated'
   aiGeneration?: { prompt: string; generatedAt: string }
   narration?: FrameNarration
+  blockOverrides?: BlockOverrides
 }
 
 export interface FrameNarration {
@@ -122,9 +132,87 @@ export function createFrameFromSource(source: Blob, id: number, imageSource: Fra
     durationSec: DEFAULT_SETTINGS.holdDurationSec,
     analysis: null,
     dirty: true,
+    blockOverrides: { splits: [] },
     imageSource,
     ...(imageSource === 'ai-generated' && prompt ? { aiGeneration: { prompt, generatedAt: new Date().toISOString() } } : {}),
   }
+}
+
+export function translateLocalAnalysis(local: Analysis, originX: number, originY: number, fullWidth: number, firstBlockId: number): Pick<Analysis, 'blocks' | 'units'> {
+  const idMap = new Map<number, number>()
+  const blocks = local.blocks.map((block, index) => {
+    const id = firstBlockId + index
+    idMap.set(block.id, id)
+    const pixels = block.pixels.map((pixel) => {
+      const x = pixel % local.img.w, y = Math.floor(pixel / local.img.w)
+      return (originY + y) * fullWidth + originX + x
+    })
+    return {
+      ...block, id, pixels,
+      bbox: { ...block.bbox, x: block.bbox.x + originX, y: block.bbox.y + originY },
+      centroid: { x: block.centroid.x + originX, y: block.centroid.y + originY },
+      x: block.bbox.x + originX, y: block.bbox.y + originY, width: block.bbox.w, height: block.bbox.h, area: block.inkArea,
+    }
+  })
+  const units = local.units.map((unit) => ({
+    ...unit,
+    blockId: idMap.get(unit.blockId) ?? unit.blockId,
+    bbox: { ...unit.bbox, x: unit.bbox.x + originX, y: unit.bbox.y + originY },
+    pixels: unit.pixels.map((pixel) => (originY + Math.floor(pixel / local.img.w)) * fullWidth + originX + pixel % local.img.w),
+    path: unit.path.map((coordinate, index) => coordinate + (index % 2 === 0 ? originX : originY)),
+  }))
+  return { blocks, units }
+}
+
+export function replaceFrameObjectWithRescan(frame: Frame, analysis: Analysis, objectId: string, translated: Pick<Analysis, 'blocks' | 'units'>): { frame: Frame; analysis: Analysis; objectIds: string[] } | null {
+  const source = frame.objects.find((object) => object.objectId === objectId)
+  if (!source || translated.blocks.length < 2) return null
+  const sourceOrder = source.settings.order
+  const children = reconcileFrameObjects(frame.id, translated.blocks).map((child, index) => ({
+    ...child,
+    settings: {
+      ...source.settings,
+      objectId: child.objectId,
+      blockId: child.blockId,
+      order: sourceOrder + index,
+      drawDurationSec: Math.max(.1, source.settings.drawDurationSec / translated.blocks.length),
+    },
+  }))
+  const objects = [...frame.objects.filter((object) => object.objectId !== objectId), ...children]
+    .sort((a, b) => a.settings.order - b.settings.order)
+    .map((object, order) => ({ ...object, settings: { ...object.settings, order } }))
+  const blocks = [...analysis.blocks.filter((block) => block.id !== source.blockId), ...translated.blocks]
+  const units = [...analysis.units.filter((unit) => unit.blockId !== source.blockId), ...translated.units]
+  const nextAnalysis = { ...analysis, blocks, units, stats: { ...analysis.stats, blocks: blocks.length, units: units.length } }
+  const persistedUnits = translated.units.map(({ _tile: _discardTile, _pathScratch: _discardScratch, ...unit }) => ({ ...unit, pixels: [...unit.pixels], path: [...unit.path] }))
+  const split: BlockSplitOverride = { sourceBBox: { ...source.bbox }, method: 'saliency-rescan', blocks: translated.blocks.map((block) => ({ ...block, bbox: { ...block.bbox }, centroid: { ...block.centroid }, pixels: [...block.pixels] })), units: persistedUnits }
+  return {
+    objectIds: children.map((child) => child.objectId),
+    analysis: nextAnalysis,
+    frame: syncFrameDuration({ ...frame, objects, analysis: nextAnalysis, blockOverrides: { splits: [...(frame.blockOverrides?.splits ?? []), split] } }),
+  }
+}
+
+export function applyBlockOverridesToAnalysis(analysis: Analysis, overrides: BlockOverrides | undefined): Analysis {
+  let blocks = [...analysis.blocks], units = [...analysis.units]
+  for (const split of overrides?.splits ?? []) {
+    const source = blocks.map((block) => ({ block, score: overlapScore(block.bbox, split.sourceBBox) })).sort((a, b) => b.score - a.score)[0]
+    if (!source || source.score < .2) continue
+    const sourceId = source.block.id
+    const occupied = new Set(blocks.filter((block) => block.id !== sourceId).map((block) => block.id))
+    let nextId = Math.max(-1, ...occupied) + 1
+    const idMap = new Map<number, number>()
+    const restoredBlocks = split.blocks.map((block) => {
+      while (occupied.has(nextId)) nextId++
+      const id = nextId++
+      occupied.add(id); idMap.set(block.id, id)
+      return { ...block, id }
+    })
+    const restoredUnits = split.units.map((unit) => ({ ...unit, blockId: idMap.get(unit.blockId) ?? unit.blockId }))
+    blocks = [...blocks.filter((block) => block.id !== sourceId), ...restoredBlocks]
+    units = [...units.filter((unit) => unit.blockId !== sourceId), ...restoredUnits]
+  }
+  return { ...analysis, blocks, units, stats: { ...analysis.stats, blocks: blocks.length, units: units.length } }
 }
 
 const DEFAULT_OBJECT_DRAW_SEC = 2

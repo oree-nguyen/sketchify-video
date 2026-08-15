@@ -13,10 +13,12 @@ type Settings struct {
 	ProbeColors, MinProbeRegion, VectorPosterizeLevels, PhotoColorClusters, MinRegionArea int
 	OrderMode                                                                             string
 	CustomOrder                                                                           []int
+	SegmentationMode                                                                      string
+	BGVarianceThreshold, BGEntropyThreshold, SaliencyPercentile                           float64
 }
 
 func DefaultSettings() Settings {
-	return Settings{WorkingWidth: 960, EdgeThreshold: 42, BGTolerance: 34, MergeRadius: 0, MinBlockInk: 60, RowThresholdFactor: .6, PhotoDensityThreshold: .0025, ProbeColors: 8, MinProbeRegion: 12, VectorPosterizeLevels: 8, PhotoColorClusters: 10, MinRegionArea: 40, OrderMode: "auto-row"}
+	return Settings{WorkingWidth: 960, EdgeThreshold: 42, BGTolerance: 34, MergeRadius: 0, MinBlockInk: 60, RowThresholdFactor: .6, PhotoDensityThreshold: .0025, ProbeColors: 8, MinProbeRegion: 12, VectorPosterizeLevels: 8, PhotoColorClusters: 10, MinRegionArea: 40, OrderMode: "auto-row", SegmentationMode: "auto", BGVarianceThreshold: 15, BGEntropyThreshold: 2.5, SaliencyPercentile: 75}
 }
 
 // Gray chuyển RGBA sang độ sáng; input/output tuyến tính O(w*h).

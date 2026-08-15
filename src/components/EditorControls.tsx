@@ -53,6 +53,7 @@ interface EditPanelProps {
   toggleObjectSelection: (objectId: string, modifiers: { range?: boolean; additive?: boolean }) => void
   groupSelectedObjects: () => void
   ungroupObject: (groupId: string) => void
+  rescanObject: (objectId: string) => void
   updateFrameSettings: (patch: Partial<FrameSettings>) => void
   updateTransition: (patch: Partial<Frame['transitionToNext']>) => void
   updateObject: (objectId: string, patch: Partial<ObjectSettings>) => void
@@ -63,7 +64,7 @@ interface EditPanelProps {
   removeFrame: () => void
 }
 
-export function EditPanel({ frame, analysis, last, scope, setScope, selectedObjectId, selectedObjectIds, selectObject, toggleObjectSelection, groupSelectedObjects, ungroupObject, updateFrameSettings, updateTransition, updateObject, reorderObject, setObjectOrderDirect, audioClip, removeAudio, removeFrame }: EditPanelProps) {
+export function EditPanel({ frame, analysis, last, scope, setScope, selectedObjectId, selectedObjectIds, selectObject, toggleObjectSelection, groupSelectedObjects, ungroupObject, rescanObject, updateFrameSettings, updateTransition, updateObject, reorderObject, setObjectOrderDirect, audioClip, removeAudio, removeFrame }: EditPanelProps) {
   const draggedObjectId = useRef<string | null>(null)
   const dropElement = useRef<HTMLElement | null>(null)
   const drawDuration = frameDrawDurationSec(frame)
@@ -120,6 +121,8 @@ export function EditPanel({ frame, analysis, last, scope, setScope, selectedObje
           {selected.settings.pushEntry.enabled && <SelectMenu label="Hướng đi vào" value={selected.settings.pushEntry.edge} options={edgeOptions} onChange={(edge) => updateObject(selected.objectId, { pushEntry: { ...selected.settings.pushEntry, edge } })} />}
           {selected.settings.pushEntry.enabled && <SelectMenu label="Tay đẩy" value={selected.settings.pushEntry.handStyle} options={pushHandOptions} onChange={(handStyle) => updateObject(selected.objectId, { pushEntry: { ...selected.settings.pushEntry, handStyle } })} />}
           <ToggleRow label="Zoom theo vật thể" checked={selected.settings.zoomFollow} disabled={frame.settings.cameraPinned} onBlocked={() => window.alert('Ghim camera đang bật (camera nhìn toàn khung, không di chuyển). Vui lòng tắt Ghim camera để dùng Zoom theo vật thể.')} onChange={(zoomFollow) => updateObject(selected.objectId, { zoomFollow })} />
+          <button className="local-rescan-button" type="button" onClick={() => rescanObject(selected.objectId)}><MagnifyingGlass size={16} weight="bold" /> Quét lại vùng này</button>
+          <small className="local-rescan-hint">Chạy saliency trong riêng bbox vật thể, có nới biên {frame.settings.localRescanPaddingPct}%.</small>
         </div>}
       </Accordion>}
 
@@ -129,6 +132,22 @@ export function EditPanel({ frame, analysis, last, scope, setScope, selectedObje
         {frame.imageSource === 'ai-generated' && <div className="ai-frame-detail"><b>Ảnh do AI tạo</b><p>{frame.aiGeneration?.prompt}</p><small>{frame.aiGeneration?.generatedAt ? new Date(frame.aiGeneration.generatedAt).toLocaleString('vi-VN') : ''}</small></div>}
         {audioClip && <div className="ai-frame-detail"><b>Giọng đọc · {formatSec(audioClip.durationSec)}</b><p>{audioClip.narrationText}</p><audio controls src={audioClip.sourceUrl} /><button className="quiet" type="button" onClick={removeAudio}>Xoá giọng đọc</button></div>}
         <button className="danger-button" type="button" onClick={removeFrame}>Xoá khung hình</button>
+      </Accordion>}
+
+      {scope === 'frame' && <Accordion title="04 · Phân tích ảnh" meta={frame.settings.segmentationMode === 'auto' ? 'Tự động' : frame.settings.segmentationMode === 'saliency' ? 'Saliency' : 'Chuẩn'}>
+        <SelectMenu label="Thuật toán tách" value={frame.settings.segmentationMode} options={[
+          { value: 'auto' as const, label: 'Tự động theo nền' },
+          { value: 'standard' as const, label: 'Ép thuật toán chuẩn' },
+          { value: 'saliency' as const, label: 'Ép thuật toán saliency' },
+        ]} onChange={(segmentationMode) => updateFrameSettings({ segmentationMode })} />
+        {analysis && <div className="analysis-metrics"><b>{analysis.stats.segmentationMode === 'saliency' ? 'Nền phức tạp · thuật toán saliency' : 'Nền đơn giản · thuật toán chuẩn'}</b><small>Độ lệch màu {analysis.stats.backgroundVariance.toFixed(1)} · entropy {analysis.stats.backgroundEntropy.toFixed(2)} bit</small></div>}
+        <details className="advanced-settings">
+          <summary>Nâng cao</summary>
+          <RangeField label="Ngưỡng phương sai nền" value={frame.settings.bgVarianceThreshold} min={2} max={60} step={1} unit="" onChange={(bgVarianceThreshold) => updateFrameSettings({ bgVarianceThreshold })} />
+          <RangeField label="Ngưỡng entropy nền" value={frame.settings.bgEntropyThreshold} min={.5} max={6} step={.1} unit="bit" onChange={(bgEntropyThreshold) => updateFrameSettings({ bgEntropyThreshold })} />
+          <RangeField label="Percentile saliency" value={frame.settings.saliencyPercentile} min={70} max={90} step={1} unit="%" onChange={(saliencyPercentile) => updateFrameSettings({ saliencyPercentile })} />
+          <RangeField label="Nới biên quét cục bộ" value={frame.settings.localRescanPaddingPct} min={0} max={12} step={1} unit="%" onChange={(localRescanPaddingPct) => updateFrameSettings({ localRescanPaddingPct })} />
+        </details>
       </Accordion>}
 
       {scope === 'frame' && <Accordion title="07 · Nhịp nghỉ" meta={`${frame.settings.microPauseMs}/${frame.settings.groupPauseMs}ms`}>

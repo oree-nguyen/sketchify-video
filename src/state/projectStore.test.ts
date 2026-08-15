@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_SETTINGS } from './settingsDefaults'
-import { DEFAULT_SUBTITLE_SETTINGS, frameDrawDurationSec, frameDurationSec, mergeFrameObjects, objectDropInsertionIndex, reconcileFrameObjects, reorderFrameObjects, retimeAnalysisForFrame, setFrameCameraPinned, setObjectOrder, setObjectZoomFollow, ungroupFrameObject, updateObjectSettings, type Frame, type Project } from './projectStore'
+import { applyBlockOverridesToAnalysis, DEFAULT_SUBTITLE_SETTINGS, frameDrawDurationSec, frameDurationSec, mergeFrameObjects, objectDropInsertionIndex, reconcileFrameObjects, replaceFrameObjectWithRescan, reorderFrameObjects, retimeAnalysisForFrame, setFrameCameraPinned, setObjectOrder, setObjectZoomFollow, ungroupFrameObject, updateObjectSettings, type Frame, type Project } from './projectStore'
 import type { Analysis, Block } from '../wasm/wasmClient'
 
 const block = (id: number, x: number): Block => ({
@@ -9,10 +9,10 @@ const block = (id: number, x: number): Block => ({
 })
 
 const analysis = (blocks: Block[]): Analysis => ({
-  img: { rgba: new Uint8Array(400), gray: new Uint8Array(100), ink: new Uint8Array(100), w: 100, h: 1, bg: [255, 255, 255] },
+  img: { rgba: new Uint8Array(400), gray: new Uint8Array(100), ink: new Uint8Array(100), saliency: new Uint8Array(), w: 100, h: 1, bg: [255, 255, 255] },
   blocks,
   units: blocks.flatMap((item) => [0, 1].map((part) => ({ type: 'path' as const, blockId: item.id, bbox: item.bbox, pixels: item.pixels, path: [item.bbox.x, 0, item.bbox.x + 1, 1], color: [0, 0, 0] as [number, number, number], cost: part + 1, t0: 0, t1: 0 }))),
-  stats: { blocks: blocks.length, units: blocks.length * 2, mergeRadiusConfigured: 0, mergeRadiusApplied: 0, workingWidthActual: 100, openingApplied: false },
+  stats: { blocks: blocks.length, units: blocks.length * 2, mergeRadiusConfigured: 0, mergeRadiusApplied: 0, workingWidthActual: 100, openingApplied: false, segmentationMode: 'standard', backgroundVariance: 0, backgroundEntropy: 0, saliencyThreshold: 0 },
 })
 
 const makeFrame = (id: number, blocks: Block[]): Frame => ({
@@ -113,5 +113,20 @@ describe('FrameObject contract', () => {
     const undoAB = ungroupFrameObject(undoOuter.frame, undoOuter.analysis, groupAB!)!
     expect(undoAB.frame.objects).toHaveLength(4)
     expect(undoAB.frame.objects.every((object) => !object.groupMembers)).toBe(true)
+  })
+
+  it('quét lại cục bộ thay một Block dính bằng nhiều Block con và lưu split để áp lại sau reload', () => {
+    const frame = makeFrame(7, [block(10, 0)])
+    const source = analysis([block(10, 0)])
+    const children = analysis([block(21, 0), block(22, 20)])
+    const replaced = replaceFrameObjectWithRescan(frame, source, frame.objects[0].objectId, { blocks: children.blocks, units: children.units })
+    expect(replaced).not.toBeNull()
+    expect(replaced!.analysis.blocks.map((item) => item.id)).toEqual([21, 22])
+    expect(replaced!.frame.objects).toHaveLength(2)
+    expect(replaced!.frame.blockOverrides?.splits).toHaveLength(1)
+    expect(replaced!.frame.blockOverrides?.splits[0].method).toBe('saliency-rescan')
+    const restored = applyBlockOverridesToAnalysis(source, replaced!.frame.blockOverrides)
+    expect(restored.blocks).toHaveLength(2)
+    expect(new Set(restored.units.map((unit) => unit.blockId)).size).toBe(2)
   })
 })

@@ -2,9 +2,11 @@ export type OrderMode = 'auto-row'|'ltr'|'rtl'|'ttb'|'btt'|'custom'
 export type CameraMode = 'off'|'A-auto-follow'|'B-manual-keyframe'|'C-two-stage'|'D-hybrid'
 export type PushEdge = 'auto'|'left'|'right'|'top'|'bottom'
 export type PageZoomMode = 'auto-rows'|'manual'
+export type SegmentationMode = 'auto'|'standard'|'saliency'
 
 export interface FrameSettings {
   workingWidth:number; edgeThreshold:number; bgTolerance:number; mergeRadius:number; minBlockInk:number
+  segmentationMode:SegmentationMode; bgVarianceThreshold:number; bgEntropyThreshold:number; saliencyPercentile:number; localRescanPaddingPct:number
   orderMode:OrderMode; rowThresholdFactor:number; customOrder:number[]
   probeColors:number; minProbeRegion:number; photoDensityThreshold:number
   vectorLevels:number; vectorMinRegionArea:number; photoClusters:number; photoMinRegionArea:number
@@ -18,6 +20,7 @@ export interface FrameSettings {
 
 export const DEFAULT_SETTINGS:FrameSettings={
   workingWidth:960,edgeThreshold:42,bgTolerance:34,mergeRadius:0,minBlockInk:60,
+  segmentationMode:'auto',bgVarianceThreshold:15,bgEntropyThreshold:2.5,saliencyPercentile:75,localRescanPaddingPct:4,
   orderMode:'auto-row',rowThresholdFactor:.65,customOrder:[],
   probeColors:8,minProbeRegion:16,photoDensityThreshold:.012,
   vectorLevels:6,vectorMinRegionArea:6,photoClusters:10,photoMinRegionArea:10,

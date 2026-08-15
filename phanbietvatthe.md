@@ -2,7 +2,7 @@
 
 Tài liệu này mô tả **đúng pipeline đang được cài đặt trong mã nguồn hiện tại** của `sketchify-video`: từ lúc người dùng tải ảnh lên, Go/WebAssembly tạo mặt nạ mực (`ink mask`), tách các vùng liên thông thành `Block`, phân loại khối vector/ảnh chụp, rồi sinh `DrawUnit` để Player vẽ lại từng phần.
 
-> **Điểm cần hiểu trước:** trong ứng dụng, “vật thể” là một **vùng hình ảnh đã được thuật toán thị giác máy tính gom thành một `Block`**, không phải kết quả nhận diện ngữ nghĩa bằng AI. Thuật toán không biết vùng đó là “con mèo”, “dòng chữ” hay “máy bay”; nó suy luận từ màu nền, cạnh ảnh, liên thông, hình học và mật độ vùng màu.
+> **Điểm cần hiểu trước:** trong ứng dụng, “vật thể” là một **vùng hình ảnh đã được thuật toán thị giác máy tính gom thành một `Block`**, không phải kết quả nhận diện ngữ nghĩa bằng AI. Thuật toán không biết vùng đó là “con mèo”, “dòng chữ” hay “máy bay”; nó suy luận từ màu nền, cạnh ảnh, saliency, liên thông, hình học và mật độ vùng màu.
 
 ## 1. Sơ đồ toàn bộ pipeline
 
@@ -13,11 +13,13 @@ RGBA, thu nhỏ tối đa về workingWidth
     ↓ gửi sang classic Web Worker
 Go/WASM
     ↓
-Ước lượng màu nền ở viền ảnh
+Đo variance + entropy màu ở viền ảnh
     ↓
-Gray + Sobel + độ lệch màu nền
-    ↓
-Ink mask nhị phân
+Tự chọn nhánh
+    ├─ nền đơn giản → Gray + Sobel + độ lệch màu nền
+    └─ nền phức tạp → spectral-residual saliency + cạnh được giới hạn vùng nổi bật
+                         ↓
+                   Ink mask nhị phân
     ↓
 Opening 1 px (erode → dilate)
     ↓
@@ -62,6 +64,30 @@ Hàm `EstimateBackground` chỉ lấy mẫu ở dải viền dày 3 px của ả
 4. Nếu không lấy được mẫu, nền mặc định là trắng `(255, 255, 255)`.
 
 Cách này phù hợp với ảnh whiteboard có nền tương đối đồng nhất và giúp bóng xám nhẹ ở nền ít bị coi nhầm là vật thể.
+
+### 3.1 Tự động phân loại nền
+
+Cùng dải viền 3 px còn được dùng để đo hai đại lượng:
+
+- độ lệch chuẩn màu RGB trung bình, được báo trong contract với tên `backgroundVariance` để giữ đúng tên tham số đặc tả;
+- entropy Shannon của histogram RGB lượng tử hóa 4 bit/kênh.
+
+Nếu đồng thời `variance < bgVarianceThreshold` và `entropy < bgEntropyThreshold`, ảnh dùng thuật toán chuẩn. Chỉ cần một đại lượng vượt ngưỡng thì ảnh dùng saliency. Mặc định hai ngưỡng là `15` và `2.5 bit`. Người dùng có thể để tự động hoặc ép `standard`/`saliency` trong UI.
+
+### 3.2 Spectral-residual saliency cho nền phức tạp
+
+Nhánh nền phức tạp dùng thuật toán Hou–Zhang thuần toán học:
+
+1. Gray được nội suy xuống lưới 64×64.
+2. FFT radix-2 hai chiều chạy theo hàng rồi cột.
+3. Tách log-amplitude và phase.
+4. Log-amplitude được lọc trung bình 3×3; hiệu với bản gốc tạo spectral residual.
+5. Ghép residual với phase rồi IFFT.
+6. Bình phương biên độ và Gaussian blur 5×5.
+7. Nội suy song tuyến tính về kích thước WorkImage, chuẩn hóa 0..255.
+8. Ngưỡng được lấy theo percentile của chính ảnh, mặc định percentile 75.
+
+Thử nghiệm cho thấy phép `ink_old OR saliency` nguyên văn vẫn giữ toàn bộ vùng “khác một màu nền” và làm các ảnh sân bay thành một Block khổng lồ. Vì vậy nhánh phức tạp giữ phần Sobel của mask cũ, nhưng chỉ nhận cạnh nằm trong vùng hỗ trợ saliency, cộng với lõi saliency vượt ngưỡng. Các hạt saliency được nối ở bán kính rất nhỏ, thích ứng khoảng `workingWidth/480` đến `workingWidth/320`, chỉ để CCL không vỡ thành hàng trăm mảnh; pixel nối không được đưa vào nội dung Block. Block quá lớn còn được kiểm tra projection profile ngang/dọc để cắt tại valley sâu nếu hai phía đều đủ mực, nhằm loại cầu nối mảnh. Nhánh nền đơn giản không thay đổi.
 
 ## 4. Tạo Ink mask
 
@@ -359,6 +385,20 @@ Gom nhóm thủ công trong React là lớp chỉnh sửa **sau phân tích**, k
 
 Việc gom này không thay đổi ảnh nguồn và không huấn luyện thuật toán tự động.
 
+## 12.1 Quét lại cục bộ một Block bị dính
+
+Nút **Quét lại vùng này** ở thiết lập vật thể thực hiện:
+
+1. lấy bbox của vật thể đang chọn và nới biên theo `localRescanPaddingPct`, mặc định 4%;
+2. cắt RGBA trực tiếp từ `WorkImage.rgba`;
+3. ép chạy pipeline saliency chỉ trên crop;
+4. chuyển toàn bộ bbox, centroid, pixel index và tọa độ path từ hệ crop về hệ tọa độ ảnh đầy đủ;
+5. nếu có từ hai Block con trở lên, thay Block cũ bằng các Block/DrawUnit mới đúng vị trí thứ tự;
+6. lưu kết quả vào `frame.blockOverrides.splits` với `method: 'saliency-rescan'`;
+7. khi khôi phục session và phân tích lại ảnh gốc, split được áp lại lên Block có độ chồng lấn hình học cao nhất.
+
+Nếu crop vẫn chỉ có một Block, ứng dụng dừng sau một lần và báo rõ không tách được tự động; không lặp vô hạn.
+
 ## 13. Những trường hợp thuật toán dễ sai
 
 ### 13.1 Hai vật thể bị dính
@@ -416,6 +456,8 @@ Các test Go quan trọng nằm trong `wasm-src/imaging_test.go`, bao gồm Gray
 | Thành phần | Tệp chính |
 |---|---|
 | Gray, Sobel, nền, ink mask, morphology | `wasm-src/imaging.go` |
+| Variance/entropy nền, FFT và spectral saliency | `wasm-src/saliency.go` |
+| Cắt cầu nối mảnh trong Block saliency quá lớn | `wasm-src/saliency_split.go` |
 | CCL, tạo Block, gom chữ, lọc, thứ tự | `wasm-src/segment.go` |
 | Median-cut và phân loại vector/photo | `wasm-src/classify.go` |
 | Contour, RDP, DrawUnit path | `wasm-src/vector.go` |

@@ -33,6 +33,9 @@ func TestDebugProjectSampleOne(t *testing.T) {
 	}
 	settings := DefaultSettings()
 	settings.MergeRadius = 0
+	// Fixture này kiểm tra hành vi pipeline nền trắng cũ; ép standard để test
+	// không phụ thuộc bộ phân loại nền tự động mới.
+	settings.SegmentationMode = "standard"
 	bg := EstimateBackground(rgba, w, h)
 	fine := DilateSquare(ErodeSquare(InkMask(rgba, w, h, settings, bg), w, h, 1), w, h, 1)
 	_, components := Components(fine, w, h)

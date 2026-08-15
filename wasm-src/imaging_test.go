@@ -184,3 +184,25 @@ func TestBuildUnitsPreservesEveryBlockPixel(t *testing.T) {
 		t.Fatalf("lost pixels: got %d want %d", len(seen), len(pixels))
 	}
 }
+
+func TestSplitOversizedSaliencyBlockCutsThinBridge(t *testing.T) {
+	w, h := 200, 80
+	rgba := solidRGBA(w, h, Color{255, 255, 255})
+	pixels := make([]int, 0)
+	for y := 15; y < 65; y++ {
+		for x := 10; x < 80; x++ {
+			pixels = append(pixels, y*w+x)
+		}
+		for x := 120; x < 190; x++ {
+			pixels = append(pixels, y*w+x)
+		}
+	}
+	for x := 80; x < 120; x++ {
+		pixels = append(pixels, 40*w+x)
+	}
+	block := blockFromPixels(pixels, rgba, w, DefaultSettings())
+	parts := SplitOversizedSaliencyBlocks([]Block{block}, rgba, w, h, DefaultSettings())
+	if len(parts) != 2 {
+		t.Fatalf("thin bridge should split into 2 blocks, got %d", len(parts))
+	}
+}

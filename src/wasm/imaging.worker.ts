@@ -1,4 +1,4 @@
-type AnalyzeMessage = { id: number; rgba: Uint8Array; width: number; height: number; settings: Record<string, number> }
+type AnalyzeMessage = { id: number; rgba: Uint8Array; width: number; height: number; settings: Record<string, unknown> }
 let ready: Promise<void> | null = null
 
 self.onmessage = async (event: MessageEvent<AnalyzeMessage | { type: 'init'; execUrl: string; wasmUrl: string }>) => {
@@ -17,7 +17,7 @@ self.onmessage = async (event: MessageEvent<AnalyzeMessage | { type: 'init'; exe
   }
   await ready
   const { id, rgba, width, height, settings } = event.data
-  const api = (self as unknown as { wbImaging: { analyze(data: Uint8Array, width: number, height: number, settings: Record<string, number>): unknown } }).wbImaging
+  const api = (self as unknown as { wbImaging: { analyze(data: Uint8Array, width: number, height: number, settings: Record<string, unknown>): unknown } }).wbImaging
   const result = api.analyze(rgba, width, height, settings)
   self.postMessage({ id, result })
 }
