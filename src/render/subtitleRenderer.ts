@@ -11,14 +11,13 @@ export function drawSubtitleOverlay(
   settings: SubtitleSettings,
   track: SubtitleTrack | undefined,
   elapsedSec: number,
-): void {
-  if (!settings.enabled || !track) return
+): SubtitleCue | undefined {
+  if (!settings.enabled || !track) return undefined
   const cue = subtitleCueAt(track.cues, elapsedSec + (track.timeOffsetSec ?? 0))
-  if (!cue) return
+  if (!cue) return undefined
   const width = context.canvas.width
   const height = context.canvas.height
-  const scale = width / 960
-  const fontSize = Math.max(14, settings.fontSizePx * scale)
+  const fontSize = Math.max(7, Math.min(20, settings.fontSizePx))
   const maxWidth = width * 0.8
   context.save()
   context.font = `${settings.italic ? 'italic ' : ''}${settings.bold ? '700' : '400'} ${fontSize}px "${settings.fontFamily}", sans-serif`
@@ -49,6 +48,7 @@ export function drawSubtitleOverlay(
     }
   })
   context.restore()
+  return cue
 }
 
 export function wrapSubtitleLines(context: Pick<CanvasRenderingContext2D, 'measureText'>, text: string, maxWidth: number): string[] {

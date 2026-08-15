@@ -87,7 +87,7 @@ export const DEFAULT_SUBTITLE_SETTINGS: SubtitleSettings = {
   xPct: 0.5,
   yPct: 0.88,
   fontFamily: 'Oswald Sketchify',
-  fontSizePx: 38,
+  fontSizePx: 14,
   color: '#ffffff',
   bold: true,
   italic: false,

@@ -21,11 +21,16 @@ const prepared = await evaluate(`(async () => {
     const source = document.createElement('canvas'); source.width = 420; source.height = 240
     const context = source.getContext('2d'); context.fillStyle = '#fff'; context.fillRect(0, 0, 420, 240); context.fillStyle = '#111'; context.font = '42px sans-serif'; context.fillText(label, 80, 125)
     const blob = await new Promise((resolve) => source.toBlob(resolve, 'image/png')); const transfer = new DataTransfer(); transfer.items.add(new File([blob], name, { type: 'image/png' }))
-    const input = document.querySelector('input[type=file]'); input.files = transfer.files; input.dispatchEvent(new Event('change', { bubbles: true }))
-    const deadline = performance.now() + 30000; while (!document.querySelector('.narration-bar') && performance.now() < deadline) await wait(100)
+    const inputDeadline = performance.now() + 30000; let input
+    while (!(input = document.querySelector('input[type=file]')) && performance.now() < inputDeadline) await wait(100)
+    if (!input) throw new Error('App chưa render input tải ảnh')
+    input.files = transfer.files; input.dispatchEvent(new Event('change', { bubbles: true }))
+    const deadline = performance.now() + 30000; while (!document.querySelector('.object-row') && performance.now() < deadline) await wait(100)
   }
   if (!document.querySelector('.frame-card')) await upload('subtitle-a.png', 'PHU DE A')
   if (!document.querySelector('.narration-preview')) {
+    if (!document.querySelector('.narration-bar')) document.querySelector('[aria-label="Mở bảng tạo audio"]')?.click()
+    await wait(100)
     const textarea = document.querySelector('.narration-bar textarea'); if (!textarea) throw new Error('Không có ô lời thoại')
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(textarea, 'Câu thứ nhất, câu thứ hai dài hơn. Kết thúc!')
     textarea.dispatchEvent(new Event('input', { bubbles: true })); textarea.dispatchEvent(new Event('change', { bubbles: true }))

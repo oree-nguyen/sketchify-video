@@ -9,7 +9,7 @@ export function SubtitlePanel({ settings, update }: { settings: SubtitleSettings
       <label className="subtitle-field"><span>Font chữ</span><select value={settings.fontFamily} onChange={(event) => update({ fontFamily: event.target.value })}>
         <option value="Oswald Sketchify">Oswald</option><option value="Arial">Arial</option><option value="Georgia">Georgia</option><option value="monospace">Monospace</option>
       </select></label>
-      <label className="range-field"><span>Cỡ chữ <output>{settings.fontSizePx}px</output></span><input className="range-input" type="range" min="18" max="72" step="1" value={settings.fontSizePx} style={{ '--range-progress': `${(settings.fontSizePx - 18) / 54 * 100}%` } as CSSProperties} onChange={(event) => update({ fontSizePx: Number(event.target.value) })} /></label>
+      <label className="range-field"><span>Cỡ chữ <output>{Math.max(7, Math.min(20, settings.fontSizePx))}px</output></span><input className="range-input" type="range" min="7" max="20" step="1" value={Math.max(7, Math.min(20, settings.fontSizePx))} style={{ '--range-progress': `${(Math.max(7, Math.min(20, settings.fontSizePx)) - 7) / 13 * 100}%` } as CSSProperties} onChange={(event) => update({ fontSizePx: Number(event.target.value) })} /></label>
       <label className="subtitle-color"><span>Màu chữ</span><input aria-label="Màu phụ đề" type="color" value={settings.color} onChange={(event) => update({ color: event.target.value })} /></label>
       <div className="subtitle-style-buttons" aria-label="Kiểu chữ">
         <button type="button" aria-pressed={settings.bold} className={settings.bold ? 'active' : ''} onClick={() => update({ bold: !settings.bold })}><b>B</b></button>

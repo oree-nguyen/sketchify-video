@@ -109,6 +109,7 @@ export async function serializeProject(project: Project): Promise<SerializedProj
 
 export async function restoreProject(serialized: SerializedProject): Promise<Project> {
   const subtitle = { ...structuredClone(DEFAULT_SUBTITLE_SETTINGS), ...serialized.subtitle }
+  subtitle.fontSizePx = Math.max(7, Math.min(20, subtitle.fontSizePx))
   if (!serialized.frames.length) return { frames: [], activeFrameId: null, handStyle: serialized.handStyle ?? 'pencil', playhead: { globalTimeSec: 0 }, audioClips: [], subtitle }
   const audioContext = new AudioContext()
   try {
