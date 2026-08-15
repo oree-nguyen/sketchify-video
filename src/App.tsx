@@ -10,7 +10,7 @@ import { beginPollinationsAuth, consumeAuthCallbackResult, disconnectPollination
 import { generateImage as pollinationsGenerateImage, generateSpeech, generateStoryScript } from './ai/pollinationsClient'
 import type { StoryProgress, StoryScene, StorySceneFailure } from './ai/types'
 import { ProjectPlayer } from './render/ProjectPlayer'
-import { createEmptyProject, createFrame, createFrameFromSource, frameDrawDurationSec, mergeFrameObjects, objectDropInsertionIndex, reconcileFrameObjects, setFrameCamera, setFrameCameraPinned, setFrameHold, setFramePageZoom, setFramePauseSettings, setFrameTransition, setObjectDuration, setObjectEffect, setObjectOrder, setObjectPush, setObjectZoomFollow, syncFrameDuration, type AudioClip, type Frame, type ObjectSettings, type Project, type SubtitleSettings } from './state/projectStore'
+import { createEmptyProject, createFrame, createFrameFromSource, frameDrawDurationSec, mergeFrameObjects, objectDropInsertionIndex, reconcileFrameObjects, setFrameCamera, setFrameCameraPinned, setFrameHold, setFramePageZoom, setFramePauseSettings, setFrameTransition, setObjectDuration, setObjectEffect, setObjectOrder, setObjectPush, setObjectZoomFollow, splitFrameObject, syncFrameDuration, type AudioClip, type Frame, type ObjectSettings, type Project, type SubtitleSettings } from './state/projectStore'
 import type { FrameSettings } from './state/settingsDefaults'
 import { buildProjectTimeline } from './timeline/projectTimeline'
 import { analyzeImage, type Analysis } from './wasm/wasmClient'
@@ -39,6 +39,8 @@ export default function App() {
   const [aiFailures, setAiFailures] = useState<StorySceneFailure[]>([])
   const [ttsBusy, setTtsBusy] = useState(false)
   const [ttsProgress, setTtsProgress] = useState<TtsProgress | null>(null)
+  const [audioOpen, setAudioOpen] = useState(false)
+  const [objectGrid, setObjectGrid] = useState(false)
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   const [activeSessionId, setActiveSessionIdState] = useState<string | null>(null)
   const [activeSessionName, setActiveSessionName] = useState('')
@@ -82,6 +84,11 @@ export default function App() {
       setAiProgress({ phase: result === 'connected' ? 'done' : 'script', message: result === 'connected' ? 'Đã kết nối Pollinations. Bạn có thể tạo nội dung.' : 'Kết nối bị từ chối hoặc state không hợp lệ.' })
     }
   }, [])
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.ctrlKey && event.key.toLowerCase() === 'g') { event.preventDefault(); groupSelectedObjects() } }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [active, analysis, selectedObjectIds])
   useEffect(() => {
     void (async () => {
       try {
@@ -191,7 +198,14 @@ export default function App() {
         ...(patch.proximityThresholdPct !== undefined ? { proximityThresholdPct: patch.proximityThresholdPct } : {}),
       })
     }
-    if (patch.cameraPinned !== undefined) next = setFrameCameraPinned(next, frameId, patch.cameraPinned)
+    if (patch.cameraPinned !== undefined) {
+      if (patch.cameraPinned && active?.settings.cameraPinned !== true) {
+        const hasZoom = active?.objects.some((object) => object.settings.zoomFollow)
+        if (hasZoom && !window.confirm('Bật Ghim camera sẽ tắt hết hiệu ứng Zoom theo vật thể của TẤT CẢ vật thể trong khung hình này. Xác nhận?')) return current
+        if (hasZoom) next = { ...next, frames: next.frames.map((frame) => frame.id === frameId ? { ...frame, objects: frame.objects.map((object) => ({ ...object, settings: { ...object.settings, zoomFollow: false } })) } : frame) }
+      }
+      next = setFrameCameraPinned(next, frameId, patch.cameraPinned)
+    }
     return next
   })
 
@@ -221,14 +235,24 @@ export default function App() {
     if (insertionIndex === null) return current
     return setObjectOrder(current, frame.id, fromObjectId, insertionIndex)
   })
+  const setObjectOrderDirect = (objectId: string, order: number) => setProject((current) => {
+    const frame = current.frames.find((candidate) => candidate.id === current.activeFrameId)
+    return frame ? setObjectOrder(current, frame.id, objectId, Math.max(0, Math.min(frame.objects.length - 1, Math.round(order)))) : current
+  })
 
   const selectOnlyObject = (objectId: string | null) => {
     setSelectedObjectId(objectId)
     setSelectedObjectIds(objectId ? [objectId] : [])
   }
 
-  const toggleObjectSelection = (objectId: string, additive = false) => setSelectedObjectIds((current) => {
-    const next = additive ? (current.includes(objectId) ? current.filter((id) => id !== objectId) : [...current, objectId]) : [objectId]
+  const toggleObjectSelection = (objectId: string, modifiers: { range?: boolean; additive?: boolean } = {}) => setSelectedObjectIds((current) => {
+    const ordered = [...(active?.objects ?? [])].sort((a, b) => a.settings.order - b.settings.order)
+    let next: string[]
+    if (modifiers.range && current.length) {
+      const a = ordered.findIndex((object) => object.objectId === current[0]), b = ordered.findIndex((object) => object.objectId === objectId)
+      const range = ordered.slice(Math.min(a, b), Math.max(a, b) + 1).map((object) => object.objectId)
+      next = modifiers.additive ? [...new Set([...current, ...range])] : range
+    } else next = modifiers.additive ? (current.includes(objectId) ? current.filter((id) => id !== objectId) : [...current, objectId]) : [objectId]
     setSelectedObjectId(next.at(-1) ?? null)
     return next
   })
@@ -241,6 +265,14 @@ export default function App() {
     setProject((current) => ({ ...current, frames: current.frames.map((frame) => frame.id === active.id ? result.frame : frame) }))
     setSelectedObjectId(result.objectId)
     setSelectedObjectIds([result.objectId])
+  }
+  const splitSelectedObject = (memberId: string) => {
+    if (!active || !analysis || !selectedObjectId) return
+    const result = splitFrameObject(active, analysis, selectedObjectId, memberId)
+    if (!result) return
+    setAnalyses((current) => ({ ...current, [active.id]: result.analysis }))
+    setProject((current) => ({ ...current, frames: current.frames.map((frame) => frame.id === active.id ? result.frame : frame) }))
+    setSelectedObjectId(memberId); setSelectedObjectIds([memberId])
   }
 
   const createNarration = async (text: string, voiceId: string, speed: number) => {
@@ -461,6 +493,18 @@ export default function App() {
       return { ...current, frames, activeFrameId: frames[Math.min(Math.max(0, index), frames.length - 1)]?.id ?? null, audioClips: current.audioClips.filter((clip) => clip.frameId !== active.id), playhead: { globalTimeSec: 0 } }
     })
   }
+  const removeFrameById = (frameId: number) => {
+    const frame = project.frames.find((item) => item.id === frameId)
+    if (!frame || !window.confirm(`Xoá khung hình “${frame.name}”?`)) return
+    project.audioClips.filter((clip) => clip.frameId === frameId).forEach((clip) => URL.revokeObjectURL(clip.sourceUrl))
+    URL.revokeObjectURL(frame.sourceUrl)
+    setProject((current) => {
+      const index = current.frames.findIndex((item) => item.id === frameId)
+      const frames = current.frames.filter((item) => item.id !== frameId)
+      return { ...current, frames, activeFrameId: current.activeFrameId === frameId ? (frames[Math.min(index, frames.length - 1)]?.id ?? null) : current.activeFrameId, playhead: { globalTimeSec: 0 }, audioClips: current.audioClips.filter((clip) => clip.frameId !== frameId) }
+    })
+    setSelectedObjectId(null); setSelectedObjectIds([])
+  }
 
   const stopPlayback = () => playerRef.current?.stop()
 
@@ -543,7 +587,7 @@ export default function App() {
     </header>
 
     <section className="workspace">
-      <FramePanel frames={project.frames} activeId={active?.id} select={selectFrame} upload={() => fileRef.current?.click()} create={() => openAiDialog()} regenerate={(frame) => void regenerateFrame(frame)} drop={handleDrop} connectPollinations={connectPollinations} onPointerMove={handleSpotlight} />
+          <FramePanel frames={project.frames} activeId={active?.id} select={selectFrame} upload={() => fileRef.current?.click()} create={() => openAiDialog()} regenerate={(frame) => void regenerateFrame(frame)} remove={(frame) => removeFrameById(frame.id)} drop={handleDrop} connectPollinations={connectPollinations} onPointerMove={handleSpotlight} />
       <section className="stage spotlight-surface" onPointerMove={handleSpotlight}>
         <div className="stage-topline"><span>{active ? `KHUNG ${project.frames.findIndex((frame) => frame.id === active.id) + 1}` : 'SẴN SÀNG'}</span><span className="stage-diagnostics">{analysis && !showRender && <button className={`mask-toggle ${showInkMask ? 'active' : ''}`} type="button" aria-pressed={showInkMask} onClick={() => setShowInkMask((value) => !value)}>Ink mask</button>}<span>{analysisStatus === 'working' ? 'Đang phân tích bằng WASM…' : analysis ? `${analysis.blocks.length} vật thể đã tách` : analysisStatus === 'error' ? 'Không thể phân tích ảnh' : 'Thêm ảnh để bắt đầu'}</span></span></div>
         <div className={`preview ${showRender ? 'has-render' : ''} ${isPlaying ? 'is-playing' : ''}`}>
@@ -551,7 +595,7 @@ export default function App() {
             <canvas ref={canvasRef} className="render-canvas" aria-label="Canvas xem thử" />
             {!showRender && <img className="source-image" src={active.sourceUrl} alt="Khung hiện tại" />}
             {analysis && showInkMask && <InkMaskOverlay analysis={analysis} />}
-            {analysis && <div className="block-overlay">{analysis.blocks.map((block) => {
+            {analysis && !isPlaying && <div className="block-overlay">{analysis.blocks.map((block) => {
               const object = active.objects.find((item) => item.blockId === block.id)
               return <button className={`block ${block.kind} ${object && selectedObjectIds.includes(object.objectId) ? 'selected' : ''}`} key={block.id} onClick={() => {
                 if (object) { selectOnlyObject(object.objectId); setEditScope('object'); setPanel('edit') }
@@ -567,9 +611,9 @@ export default function App() {
           {!active && <canvas ref={canvasRef} className="render-canvas" aria-label="Canvas xem thử" />}
           {!active && <div className="empty-preview"><strong>Biến ảnh thành câu chuyện được vẽ</strong><p>Tải ảnh của bạn hoặc để AI tạo trọn storyboard tiếng Việt.</p><div className="empty-actions"><button className="export" onClick={() => fileRef.current?.click()}>Tải ảnh lên</button><button className="quiet" onClick={() => openAiDialog()}>Tạo video từ chủ đề…</button></div></div>}
         </div>
-        <div className="transport"><div className="transport-left"><button className={`cc-toggle ${project.subtitle.enabled ? 'active' : ''}`} aria-label="Bật tắt phụ đề" aria-pressed={project.subtitle.enabled} onClick={() => updateSubtitle({ enabled: !project.subtitle.enabled })}>CC</button></div><div className="transport-center"><button disabled={isPlaying} onClick={() => setProgress(Math.max(0, progress - 10))}>−10</button><button className="play" disabled={!active} onClick={() => void play(false)}>{isPlaying ? 'Ⅱ' : '▶'}</button><button disabled={isPlaying} onClick={() => setProgress(Math.min(total, progress + 10))}>+10</button></div><span className="duration">{formatTime(progress)} / {formatTime(total)}</span></div>
+        <div className="transport"><div className="transport-left"><button className={`cc-toggle ${project.subtitle.enabled ? 'active' : ''}`} aria-label="Bật tắt phụ đề" aria-pressed={project.subtitle.enabled} onClick={() => updateSubtitle({ enabled: !project.subtitle.enabled })}>CC</button><button className={`mic-toggle ${audioOpen ? 'active' : ''}`} aria-label="Mở bảng tạo audio" aria-pressed={audioOpen} onClick={() => setAudioOpen((value) => !value)}>♩</button></div><div className="transport-center"><button disabled={isPlaying} onClick={() => setProgress(Math.max(0, progress - 10))}>−10</button><button className="play" disabled={!active} onClick={() => void play(false)}>{isPlaying ? 'Ⅱ' : '▶'}</button><button disabled={isPlaying} onClick={() => setProgress(Math.min(total, progress + 10))}>+10</button></div><span className="duration">{formatTime(progress)} / {formatTime(total)}</span></div>
         <input aria-label="Playhead" className="scrubber range-input" type="range" min="0" max={Math.max(total, 1)} step=".1" value={Math.min(progress, total)} style={{ '--range-progress': `${rangeProgress}%` } as CSSProperties} onChange={(event) => setProgress(Number(event.target.value))} />
-        {active && <NarrationBar frame={active} busy={ttsBusy} progress={ttsProgress} create={(text, voiceId, speed) => void createNarration(text, voiceId, speed)} />}
+        {active && audioOpen && <NarrationBar frame={active} busy={ttsBusy} progress={ttsProgress} onClose={() => setAudioOpen(false)} create={(text, voiceId, speed) => void createNarration(text, voiceId, speed)} />}
       </section>
       <aside className="inspector spotlight-surface" onPointerMove={handleSpotlight}>
         <nav className="tool-rail"><button className={panel === 'hand' ? 'active' : ''} onClick={() => setPanel('hand')} aria-label="Bàn tay" title="Bàn tay">✎</button>{active && <button className={panel === 'edit' ? 'active' : ''} onClick={() => setPanel('edit')} aria-label="Chỉnh sửa" title="Chỉnh sửa">☷</button>}<button className={panel === 'subtitle' ? 'active' : ''} onClick={() => setPanel('subtitle')} aria-label="Phụ đề" title="Phụ đề">CC</button></nav>
@@ -577,7 +621,7 @@ export default function App() {
           ? <SubtitlePanel settings={project.subtitle} update={updateSubtitle} />
           : panel === 'hand' || !active
           ? <HandPanel style={project.handStyle} setStyle={(handStyle) => setProject((current) => ({ ...current, handStyle }))} />
-          : <EditPanel frame={active} analysis={analysis} last={project.frames.at(-1)?.id === active.id} scope={editScope} setScope={setEditScope} selectedObjectId={selectedObjectId} selectedObjectIds={selectedObjectIds} selectObject={selectOnlyObject} toggleObjectSelection={toggleObjectSelection} groupSelectedObjects={groupSelectedObjects} updateFrameSettings={updateFrameSettings} updateTransition={updateTransition} updateObject={updateObject} reorderObject={reorderObject} audioClip={project.audioClips.find((clip) => clip.frameId === active.id)} removeAudio={removeActiveAudio} removeFrame={removeActiveFrame} />}
+          : <EditPanel frame={active} analysis={analysis} last={project.frames.at(-1)?.id === active.id} scope={editScope} setScope={setEditScope} selectedObjectId={selectedObjectId} selectedObjectIds={selectedObjectIds} selectObject={selectOnlyObject} toggleObjectSelection={toggleObjectSelection} groupSelectedObjects={groupSelectedObjects} splitObject={(groupId, memberId) => { if (!active || !analysis) return; const result = splitFrameObject(active, analysis, groupId, memberId); if (!result) return; setAnalyses((current) => ({ ...current, [active.id]: result.analysis })); setProject((current) => ({ ...current, frames: current.frames.map((frame) => frame.id === active.id ? result.frame : frame) })); selectOnlyObject(memberId) }} updateFrameSettings={updateFrameSettings} updateTransition={updateTransition} updateObject={updateObject} reorderObject={reorderObject} setObjectOrderDirect={setObjectOrderDirect} audioClip={project.audioClips.find((clip) => clip.frameId === active.id)} removeAudio={removeActiveAudio} removeFrame={removeActiveFrame} />}
         </div>
       </aside>
     </section>

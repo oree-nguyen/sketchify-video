@@ -13,9 +13,11 @@ type ResponseMessage =
 
 self.onmessage = async (event: MessageEvent<Request>) => {
   const { id, text, voiceId, baseUrl, speed } = event.data
+  let stage = 'resolve voice'
   try {
     const voice = voiceById(voiceId)
     const report = (progress: TtsProgress) => post({ id, type: 'progress', progress })
+    stage = 'load model / phonemize / inference'
     const result = voice.engine === 'piper'
       ? await synthesizePiper(text, voice, baseUrl, report, speed)
       : voice.engine === 'vieneu'
@@ -23,7 +25,8 @@ self.onmessage = async (event: MessageEvent<Request>) => {
         : await synthesizeMatcha(text, voice, baseUrl, report, speed)
     post({ id, type: 'result', ...result }, [result.pcm.buffer])
   } catch (error) {
-    post({ id, type: 'error', message: error instanceof Error ? error.message : 'Không thể tạo giọng đọc.' })
+    const cause = error instanceof Error ? error.message : 'Unknown error'
+    post({ id, type: 'error', message: `[TTS ${voiceId}] bước ${stage} thất bại: ${cause}` })
   }
 }
 

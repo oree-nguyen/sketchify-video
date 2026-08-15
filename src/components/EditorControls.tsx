@@ -1,4 +1,4 @@
-import { useEffect, useRef, type CSSProperties, type DragEvent, type MutableRefObject, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type DragEvent, type MutableRefObject, type ReactNode } from 'react'
 import { HAND_ASSETS } from '../assets/hands/registry'
 import { buildCameraTimeline } from '../camera/cameraTimeline'
 import { frameDrawDurationSec, frameDurationSec, type AudioClip, type Frame, type FrameObject, type HandStyleId, type ObjectSettings, type PushHandStyle, type TransitionType } from '../state/projectStore'
@@ -49,24 +49,28 @@ interface EditPanelProps {
   selectedObjectId: string | null
   selectedObjectIds: string[]
   selectObject: (objectId: string | null) => void
-  toggleObjectSelection: (objectId: string, additive: boolean) => void
+  toggleObjectSelection: (objectId: string, modifiers: { range?: boolean; additive?: boolean }) => void
   groupSelectedObjects: () => void
+  splitObject: (groupId: string, memberId: string) => void
   updateFrameSettings: (patch: Partial<FrameSettings>) => void
   updateTransition: (patch: Partial<Frame['transitionToNext']>) => void
   updateObject: (objectId: string, patch: Partial<ObjectSettings>) => void
   reorderObject: (fromObjectId: string, toObjectId: string, position: 'before' | 'after') => void
+  setObjectOrderDirect: (objectId: string, order: number) => void
   audioClip?: AudioClip
   removeAudio: () => void
   removeFrame: () => void
 }
 
-export function EditPanel({ frame, analysis, last, scope, setScope, selectedObjectId, selectedObjectIds, selectObject, toggleObjectSelection, groupSelectedObjects, updateFrameSettings, updateTransition, updateObject, reorderObject, audioClip, removeAudio, removeFrame }: EditPanelProps) {
+export function EditPanel({ frame, analysis, last, scope, setScope, selectedObjectId, selectedObjectIds, selectObject, toggleObjectSelection, groupSelectedObjects, splitObject, updateFrameSettings, updateTransition, updateObject, reorderObject, setObjectOrderDirect, audioClip, removeAudio, removeFrame }: EditPanelProps) {
   const draggedObjectId = useRef<string | null>(null)
   const dropElement = useRef<HTMLElement | null>(null)
   const drawDuration = frameDrawDurationSec(frame)
   const zoomBlocks = frame.objects.filter((object) => object.settings.zoomFollow).map((object) => object.blockId)
   const cameraTimeline = analysis ? buildCameraTimeline(frame.settings, analysis.blocks, analysis.units, analysis.img.w, analysis.img.h, zoomBlocks, drawDuration) : null
   const selected = frame.objects.find((object) => object.objectId === selectedObjectId) ?? frame.objects[0]
+  const [gridMode, setGridMode] = useState(false)
+  const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null)
 
   return <>
     <div className="inspector-title"><span>ĐỊNH DẠNG</span><h2>Khung & vật thể</h2><p>{frame.name}</p></div>
@@ -77,8 +81,8 @@ export function EditPanel({ frame, analysis, last, scope, setScope, selectedObje
     <div className="settings-accordion">
       {scope === 'object' && <Accordion title="Vật thể" meta={`${frame.objects.length} · ${formatSec(drawDuration)} vẽ`} open>
         {!frame.objects.length && <p className="empty-objects">Đang chờ kết quả phân tích để tạo danh sách vật thể…</p>}
-        {frame.objects.length > 0 && <div className="object-group-toolbar"><span>{selectedObjectIds.length} vật thể đã chọn</span><button type="button" disabled={selectedObjectIds.length < 2} onClick={groupSelectedObjects}>Gom nhóm</button></div>}
-        <div className="object-list" aria-label="Danh sách vật thể">
+        {frame.objects.length > 0 && <div className="object-group-toolbar"><span>{selectedObjectIds.length} vật thể đã chọn</span><div className="object-toolbar-icons"><button type="button" title="Gom nhóm" aria-label="Gom nhóm" disabled={selectedObjectIds.length < 2} onClick={groupSelectedObjects}>⊞</button><button type="button" title="Tách vật thể khỏi nhóm" aria-label="Tách vật thể khỏi nhóm" disabled={!selected?.groupMembers?.length} onClick={() => selected?.groupMembers?.[0] && setExpandedGroupId(selected.objectId)}>↗</button><button type="button" title="Đẩy vật thể vào khung" aria-label="Đẩy vật thể vào khung" disabled={!selected} onClick={() => selected && updateObject(selected.objectId, { pushEntry: { ...selected.settings.pushEntry, enabled: !selected.settings.pushEntry.enabled } })}>➜</button><button type="button" title="Zoom theo vật thể" aria-label="Zoom theo vật thể" disabled={!selected} onClick={() => selected && updateObject(selected.objectId, { zoomFollow: !selected.settings.zoomFollow })}>⌕</button><button type="button" title="Dạng lưới" aria-label="Dạng lưới" aria-pressed={gridMode} onClick={() => setGridMode((value) => !value)}>▦</button></div></div>}
+        <div className={`object-list ${gridMode ? 'object-grid' : ''}`} aria-label="Danh sách vật thể">
           {[...frame.objects].sort((a, b) => a.settings.order - b.settings.order).map((object) => <article
             className={`object-row ${selectedObjectIds.includes(object.objectId) ? 'selected' : ''}`}
             key={object.objectId}
@@ -90,11 +94,11 @@ export function EditPanel({ frame, analysis, last, scope, setScope, selectedObje
             onDragOver={(event) => markObjectDrop(event, object.objectId, draggedObjectId, dropElement)}
             onDragLeave={(event) => clearObjectDropOnLeave(event, dropElement)}
             onDrop={(event) => dropObject(event, object.objectId, draggedObjectId, dropElement, reorderObject)}
-            onClick={(event) => toggleObjectSelection(object.objectId, event.shiftKey)}
+            onClick={(event) => toggleObjectSelection(object.objectId, { range: event.shiftKey, additive: event.ctrlKey || event.metaKey })}
           >
             <span className="object-grip" aria-hidden="true">⠿</span>
             <ObjectThumbnail analysis={analysis} object={object} />
-            <span className="object-summary"><b>#{object.settings.order + 1} <em>{object.settings.kindOverride ?? object.kind}</em></b><small>{object.inkArea} ink · {object.bbox.w}×{object.bbox.h}px</small>{selected?.objectId === object.objectId && <small className="timeline-clean">Timeline đã cập nhật</small>}</span>
+            <span className="object-summary"><b>#{object.settings.order + 1} <em>{object.settings.kindOverride ?? object.kind}</em></b><small>{object.inkArea} ink · {object.bbox.w}×{object.bbox.h}px</small>{selected?.objectId === object.objectId && <small className="timeline-clean">Timeline đã cập nhật</small>}<label className="order-input" onClick={(event) => event.stopPropagation()}><input aria-label={`Thứ tự vật thể ${object.settings.order + 1}`} type="number" min="1" value={object.settings.order + 1} onChange={(event) => { const value = Number(event.target.value); if (Number.isFinite(value)) setObjectOrderDirect(object.objectId, value - 1) }} onKeyDown={(event) => { if (event.key === 'Enter') (event.currentTarget as HTMLInputElement).blur() }} /><span>thứ tự</span></label></span>
             <label className="object-duration" onClick={(event) => event.stopPropagation()}><span>Vẽ</span><input type="number" min="0.1" max="120" step="0.1" value={object.settings.drawDurationSec} onChange={(event) => updateObject(object.objectId, { drawDurationSec: Math.max(.1, Number(event.target.value)) })} /><i>s</i></label>
             <span className="object-flags" aria-label="Hiệu ứng vật thể">
               <button type="button" title="Đẩy vào khung" aria-pressed={object.settings.pushEntry.enabled} onClick={(event) => { event.stopPropagation(); updateObject(object.objectId, { pushEntry: { ...object.settings.pushEntry, enabled: !object.settings.pushEntry.enabled } }) }}>↗</button>
@@ -102,6 +106,8 @@ export function EditPanel({ frame, analysis, last, scope, setScope, selectedObje
             </span>
           </article>)}
         </div>
+
+        {expandedGroupId && frame.objects.find((object) => object.objectId === expandedGroupId)?.groupMembers && <div className="group-members"><b>Vật thể trong nhóm</b>{frame.objects.find((object) => object.objectId === expandedGroupId)!.groupMembers!.map((member) => <button key={member.objectId} type="button" onClick={() => splitObject(expandedGroupId, member.objectId)}>Tách #{member.settings.order + 1}</button>)}</div>}
 
         {selected && <div className="object-detail">
           <div className="object-detail-heading"><span>Thiết lập vật thể #{selected.settings.order + 1}</span><small>ID {selected.objectId}</small></div>

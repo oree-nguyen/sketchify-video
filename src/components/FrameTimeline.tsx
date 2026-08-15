@@ -9,9 +9,10 @@ interface TimelineProps {
   drop: (event: DragEvent) => void
   create: () => void
   regenerate: (frame: Frame) => void
+  remove: (frame: Frame) => void
 }
 
-export function FramePanel({ frames, activeId, select, drop, create, regenerate, connectPollinations, onPointerMove }: TimelineProps & { connectPollinations: () => void; onPointerMove: PointerEventHandler<HTMLElement> }) {
+export function FramePanel({ frames, activeId, select, drop, create, regenerate, remove, connectPollinations, onPointerMove }: TimelineProps & { connectPollinations: () => void; onPointerMove: PointerEventHandler<HTMLElement> }) {
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   const nodes = useRef(new Map<number, HTMLElement>())
   const before = useRef(new Map<number, DOMRect>())
@@ -59,6 +60,7 @@ export function FramePanel({ frames, activeId, select, drop, create, regenerate,
         <span className="frame-index">{String(index + 1).padStart(2, '0')}</span>
         <img src={frame.sourceUrl} alt={frame.name} />
         <span>{frame.name}{frame.dirty ? ' · đang cập nhật' : ''}</span>
+        <button className="frame-delete" type="button" aria-label={`Xoá ${frame.name}`} title="Xoá khung hình" onClick={(event) => { event.stopPropagation(); remove(frame) }}>⌫</button>
         {frame.imageSource === 'ai-generated' && <span className="ai-frame-meta" title={frame.aiGeneration?.prompt}>{frame.aiGeneration?.prompt}<button type="button" onClick={(event) => { event.stopPropagation(); regenerate(frame) }}>Tạo lại</button></span>}
       </article>)}
       <UploadCard number={frames.length + 1} upload={create} drop={drop} />

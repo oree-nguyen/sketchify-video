@@ -8,9 +8,10 @@ interface Props {
   busy: boolean
   progress: TtsProgress | null
   create: (text: string, voiceId: string, speed: number) => void
+  onClose?: () => void
 }
 
-export function NarrationBar({ frame, busy, progress, create }: Props) {
+export function NarrationBar({ frame, busy, progress, create, onClose }: Props) {
   const [text, setText] = useState(frame.narration?.text ?? '')
   const savedVoiceId = frame.narration?.voiceId ?? DEFAULT_VOICE_BY_LANGUAGE.vi
   const savedVoice = (() => { try { return voiceById(savedVoiceId) } catch { return voiceById(DEFAULT_VOICE_BY_LANGUAGE.vi) } })()
@@ -29,7 +30,7 @@ export function NarrationBar({ frame, busy, progress, create }: Props) {
   const voices = TTS_VOICES.filter((voice) => voice.language === language)
   const selectedVoice = voices.find((voice) => voice.id === voiceId)
   const status = progress?.phase === 'download' ? `Đang tải giọng đọc... ${progress.percent ?? 0}%` : progress?.phase === 'inference' ? 'Đang tạo giọng nói...' : null
-  return <div className="narration-bar">
+  return <div className="narration-bar"><button className="narration-close quiet" type="button" aria-label="Đóng bảng audio" onClick={onClose}>×</button>
     <textarea aria-label="Lời thoại khung hình" placeholder="Nhập lời thoại cho khung hình này..." value={text} onChange={(event) => setText(event.target.value)} />
     <div className="narration-actions">
       <select aria-label="Ngôn ngữ giọng đọc" value={language} onChange={(event) => {

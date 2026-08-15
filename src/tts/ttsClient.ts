@@ -17,7 +17,7 @@ export async function synthesizeSpeech(text: string, voiceId: string, speed = 1,
       if (event.data.id !== id) return
       if (event.data.type === 'progress') { onProgress?.(event.data.progress!); return }
       worker?.removeEventListener('message', listener)
-      if (event.data.type === 'error') reject(new Error(event.data.message))
+      if (event.data.type === 'error') { console.error('[Sketchify] TTS failed', { voiceId, detail: event.data.message }); reject(new Error(event.data.message)) }
       else resolve({ pcm: event.data.pcm!, sampleRate: event.data.sampleRate!, wordTimestamps: event.data.wordTimestamps ?? [] })
     }
     worker!.addEventListener('message', listener)

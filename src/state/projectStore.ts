@@ -30,6 +30,9 @@ export interface FrameObject {
   kind: Block['kind']
   inkArea: number
   settings: ObjectSettings
+  groupMembers?: FrameObject[]
+  groupBlocks?: Block[]
+  groupUnitsByMember?: Record<string, DrawUnit[]>
 }
 
 export interface Frame {
@@ -113,7 +116,7 @@ export function createFrameFromSource(source: Blob, id: number, imageSource: Fra
     id,
     name: name ?? (source instanceof File ? source.name : `Ảnh AI ${new Date().toLocaleTimeString('vi-VN')}.png`),
     sourceUrl: URL.createObjectURL(source),
-    settings: structuredClone(DEFAULT_SETTINGS),
+    settings: { ...structuredClone(DEFAULT_SETTINGS), cameraPinned: true },
     objects: [],
     transitionToNext: { type: 'none', durationSec: 1 },
     durationSec: DEFAULT_SETTINGS.holdDurationSec,
@@ -299,6 +302,9 @@ export function mergeFrameObjects(frame: Frame, analysis: Analysis, objectIds: s
   const grouped: FrameObject = {
     objectId, blockId: id, bbox: mergedBlock.bbox, centroid: mergedBlock.centroid,
     kind: mergedBlock.kind, inkArea,
+    groupMembers: selected,
+    groupBlocks: sourceBlocks,
+    groupUnitsByMember: Object.fromEntries(selected.map((object) => [object.objectId, analysis.units.filter((unit) => unit.blockId === object.blockId)])),
     settings: {
       ...first.settings, objectId, blockId: id,
       order: Math.min(...selected.map((object) => object.settings.order)),
@@ -323,6 +329,33 @@ export function mergeFrameObjects(frame: Frame, analysis: Analysis, objectIds: s
     frame: syncFrameDuration({ ...frame, objects, analysis: nextAnalysis }),
     analysis: nextAnalysis,
   }
+}
+
+export function splitFrameObject(frame: Frame, analysis: Analysis, objectId: string, memberId: string): { frame: Frame; analysis: Analysis } | null {
+  const grouped = frame.objects.find((object) => object.objectId === objectId)
+  if (!grouped?.groupMembers?.length) return null
+  const member = grouped.groupMembers.find((candidate) => candidate.objectId === memberId)
+  if (!member) return null
+  const remainingMembers = grouped.groupMembers.filter((candidate) => candidate.objectId !== memberId)
+  const memberBlock = grouped.groupBlocks?.find((block) => block.id === member.blockId) ?? analysis.blocks.find((block) => block.id === member.blockId)
+  if (!memberBlock) return null
+  const objects = frame.objects.filter((object) => object.objectId !== objectId)
+  if (remainingMembers.length > 1) {
+    const nextGroup = { ...grouped, groupMembers: remainingMembers, groupBlocks: (grouped.groupBlocks ?? []).filter((block) => remainingMembers.some((item) => item.blockId === block.id)), groupUnitsByMember: Object.fromEntries(remainingMembers.map((item) => [item.objectId, grouped.groupUnitsByMember?.[item.objectId] ?? []])), blockId: remainingMembers[0].blockId, bbox: {
+      x: Math.min(...remainingMembers.map((item) => item.bbox.x)), y: Math.min(...remainingMembers.map((item) => item.bbox.y)),
+      w: Math.max(...remainingMembers.map((item) => item.bbox.x + item.bbox.w)) - Math.min(...remainingMembers.map((item) => item.bbox.x)),
+      h: Math.max(...remainingMembers.map((item) => item.bbox.y + item.bbox.h)) - Math.min(...remainingMembers.map((item) => item.bbox.y)),
+    } }
+    objects.push(nextGroup)
+  } else if (remainingMembers.length === 1) objects.push(remainingMembers[0])
+  objects.push(member)
+  const normalized = objects.sort((a, b) => a.settings.order - b.settings.order).map((object, order) => ({ ...object, settings: { ...object.settings, order } }))
+  const blockIds = new Set([member.blockId, ...remainingMembers.map((item) => item.blockId)])
+  const restored = grouped.groupBlocks ?? []
+  const blocks = [...analysis.blocks.filter((block) => block.id !== grouped.blockId && !blockIds.has(block.id)), ...restored].sort((a, b) => a.id - b.id)
+  const restoredUnits = Object.values(grouped.groupUnitsByMember ?? {}).flat().filter((unit) => unit.blockId !== member.blockId || unit.blockId === member.blockId)
+  const units = [...analysis.units.filter((unit) => unit.blockId !== grouped.blockId), ...restoredUnits].sort((a, b) => a.t0 - b.t0)
+  return { frame: syncFrameDuration({ ...frame, objects: normalized, analysis: { ...analysis, blocks, units, stats: { ...analysis.stats, blocks: blocks.length } } }), analysis: { ...analysis, blocks, units, stats: { ...analysis.stats, blocks: blocks.length } } }
 }
 
 export function reorderFrameObjects(frame: Frame, fromObjectId: string, toObjectId: string): Frame {
