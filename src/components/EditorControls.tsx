@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type DragEvent, type MutableRefObject, type ReactNode } from 'react'
+import { ArrowSquareIn, CaretDown, CaretRight, DotsSixVertical, FrameCorners, ListBullets, MagnifyingGlass, SquaresFour, StackMinus, StackPlus } from '@phosphor-icons/react'
 import { HAND_ASSETS } from '../assets/hands/registry'
 import { buildCameraTimeline } from '../camera/cameraTimeline'
 import { frameDrawDurationSec, frameDurationSec, type AudioClip, type Frame, type FrameObject, type HandStyleId, type ObjectSettings, type PushHandStyle, type TransitionType } from '../state/projectStore'
@@ -51,7 +52,7 @@ interface EditPanelProps {
   selectObject: (objectId: string | null) => void
   toggleObjectSelection: (objectId: string, modifiers: { range?: boolean; additive?: boolean }) => void
   groupSelectedObjects: () => void
-  splitObject: (groupId: string, memberId: string) => void
+  ungroupObject: (groupId: string) => void
   updateFrameSettings: (patch: Partial<FrameSettings>) => void
   updateTransition: (patch: Partial<Frame['transitionToNext']>) => void
   updateObject: (objectId: string, patch: Partial<ObjectSettings>) => void
@@ -62,7 +63,7 @@ interface EditPanelProps {
   removeFrame: () => void
 }
 
-export function EditPanel({ frame, analysis, last, scope, setScope, selectedObjectId, selectedObjectIds, selectObject, toggleObjectSelection, groupSelectedObjects, splitObject, updateFrameSettings, updateTransition, updateObject, reorderObject, setObjectOrderDirect, audioClip, removeAudio, removeFrame }: EditPanelProps) {
+export function EditPanel({ frame, analysis, last, scope, setScope, selectedObjectId, selectedObjectIds, selectObject, toggleObjectSelection, groupSelectedObjects, ungroupObject, updateFrameSettings, updateTransition, updateObject, reorderObject, setObjectOrderDirect, audioClip, removeAudio, removeFrame }: EditPanelProps) {
   const draggedObjectId = useRef<string | null>(null)
   const dropElement = useRef<HTMLElement | null>(null)
   const drawDuration = frameDrawDurationSec(frame)
@@ -81,7 +82,7 @@ export function EditPanel({ frame, analysis, last, scope, setScope, selectedObje
     <div className="settings-accordion">
       {scope === 'object' && <Accordion title="Vật thể" meta={`${frame.objects.length} · ${formatSec(drawDuration)} vẽ`} open>
         {!frame.objects.length && <p className="empty-objects">Đang chờ kết quả phân tích để tạo danh sách vật thể…</p>}
-        {frame.objects.length > 0 && <div className="object-group-toolbar"><span>{selectedObjectIds.length} vật thể đã chọn</span><div className="object-toolbar-icons"><button type="button" title="Gom nhóm" aria-label="Gom nhóm" disabled={selectedObjectIds.length < 2} onClick={groupSelectedObjects}>⊞</button><button type="button" title="Tách vật thể khỏi nhóm" aria-label="Tách vật thể khỏi nhóm" disabled={!selected?.groupMembers?.length} onClick={() => selected?.groupMembers?.[0] && setExpandedGroupId(selected.objectId)}>↗</button><button type="button" title="Đẩy vật thể vào khung" aria-label="Đẩy vật thể vào khung" disabled={!selected} onClick={() => selected && updateObject(selected.objectId, { pushEntry: { ...selected.settings.pushEntry, enabled: !selected.settings.pushEntry.enabled } })}>➜</button><button type="button" title="Zoom theo vật thể" aria-label="Zoom theo vật thể" disabled={!selected} onClick={() => selected && updateObject(selected.objectId, { zoomFollow: !selected.settings.zoomFollow })}>⌕</button><button type="button" title="Dạng lưới" aria-label="Dạng lưới" aria-pressed={gridMode} onClick={() => setGridMode((value) => !value)}>▦</button></div></div>}
+        {frame.objects.length > 0 && <div className="object-group-toolbar"><span>{selectedObjectIds.length} vật thể đã chọn</span><div className="object-toolbar-icons"><button type="button" title="Gom nhóm (Ctrl+G)" aria-label="Gom nhóm" disabled={selectedObjectIds.length < 2} onClick={groupSelectedObjects}><StackPlus size={16} weight="bold" /></button><button type="button" title="Tách nhóm về lần gom gần nhất" aria-label="Tách nhóm" disabled={!selected?.groupMembers?.length} onClick={() => selected && ungroupObject(selected.objectId)}><StackMinus size={16} weight="bold" /></button><button type="button" title="Đẩy vật thể vào khung" aria-label="Đẩy vật thể vào khung" disabled={!selected} aria-pressed={selected?.settings.pushEntry.enabled} onClick={() => selected && updateObject(selected.objectId, { pushEntry: { ...selected.settings.pushEntry, enabled: !selected.settings.pushEntry.enabled } })}><ArrowSquareIn size={16} weight="bold" /></button><button type="button" title="Zoom theo vật thể" aria-label="Zoom theo vật thể" disabled={!selected} aria-pressed={selected?.settings.zoomFollow} onClick={() => selected && updateObject(selected.objectId, { zoomFollow: !selected.settings.zoomFollow })}><MagnifyingGlass size={16} weight="bold" /></button><button type="button" title={gridMode ? 'Xem dạng danh sách' : 'Xem dạng lưới'} aria-label={gridMode ? 'Xem dạng danh sách' : 'Xem dạng lưới'} aria-pressed={gridMode} onClick={() => setGridMode((value) => !value)}>{gridMode ? <ListBullets size={16} weight="bold" /> : <SquaresFour size={16} weight="bold" />}</button></div></div>}
         <div className={`object-list ${gridMode ? 'object-grid' : ''}`} aria-label="Danh sách vật thể">
           {[...frame.objects].sort((a, b) => a.settings.order - b.settings.order).map((object) => <article
             className={`object-row ${selectedObjectIds.includes(object.objectId) ? 'selected' : ''}`}
@@ -96,18 +97,18 @@ export function EditPanel({ frame, analysis, last, scope, setScope, selectedObje
             onDrop={(event) => dropObject(event, object.objectId, draggedObjectId, dropElement, reorderObject)}
             onClick={(event) => toggleObjectSelection(object.objectId, { range: event.shiftKey, additive: event.ctrlKey || event.metaKey })}
           >
-            <span className="object-grip" aria-hidden="true">⠿</span>
+            <span className="object-grip" aria-hidden="true"><DotsSixVertical size={15} weight="bold" /></span>
             <ObjectThumbnail analysis={analysis} object={object} />
-            <span className="object-summary"><b>#{object.settings.order + 1} <em>{object.settings.kindOverride ?? object.kind}</em></b><small>{object.inkArea} ink · {object.bbox.w}×{object.bbox.h}px</small>{selected?.objectId === object.objectId && <small className="timeline-clean">Timeline đã cập nhật</small>}<label className="order-input" onClick={(event) => event.stopPropagation()}><input aria-label={`Thứ tự vật thể ${object.settings.order + 1}`} type="number" min="1" value={object.settings.order + 1} onChange={(event) => { const value = Number(event.target.value); if (Number.isFinite(value)) setObjectOrderDirect(object.objectId, value - 1) }} onKeyDown={(event) => { if (event.key === 'Enter') (event.currentTarget as HTMLInputElement).blur() }} /><span>thứ tự</span></label></span>
-            <label className="object-duration" onClick={(event) => event.stopPropagation()}><span>Vẽ</span><input type="number" min="0.1" max="120" step="0.1" value={object.settings.drawDurationSec} onChange={(event) => updateObject(object.objectId, { drawDurationSec: Math.max(.1, Number(event.target.value)) })} /><i>s</i></label>
+            <span className="object-summary"><b><ObjectOrderInput object={object} count={frame.objects.length} commit={setObjectOrderDirect} /><em>{object.settings.kindOverride ?? object.kind}</em>{object.groupMembers?.length ? <button className="group-disclosure" type="button" aria-expanded={expandedGroupId === object.objectId} title="Xem các vật thể trong nhóm" onClick={(event) => { event.stopPropagation(); setExpandedGroupId((current) => current === object.objectId ? null : object.objectId) }}>{expandedGroupId === object.objectId ? <CaretDown size={13} weight="bold" /> : <CaretRight size={13} weight="bold" />}<span>{object.groupMembers.length}</span></button> : null}</b><small>{object.inkArea} ink · {object.bbox.w}×{object.bbox.h}px</small>{selected?.objectId === object.objectId && <small className="timeline-clean">Timeline đã cập nhật</small>}</span>
+            <label className="object-duration" title="Thời gian vẽ" onClick={(event) => event.stopPropagation()}><input aria-label="Thời gian vẽ" type="number" min="0.1" max="120" step="0.1" value={object.settings.drawDurationSec} onChange={(event) => updateObject(object.objectId, { drawDurationSec: Math.max(.1, Number(event.target.value)) })} /><i>s</i></label>
             <span className="object-flags" aria-label="Hiệu ứng vật thể">
-              <button type="button" title="Đẩy vào khung" aria-pressed={object.settings.pushEntry.enabled} onClick={(event) => { event.stopPropagation(); updateObject(object.objectId, { pushEntry: { ...object.settings.pushEntry, enabled: !object.settings.pushEntry.enabled } }) }}>↗</button>
-              <button type="button" title="Zoom theo vật thể" aria-pressed={object.settings.zoomFollow} onClick={(event) => { event.stopPropagation(); if (frame.settings.cameraPinned && !object.settings.zoomFollow) window.alert('Ghim camera đang bật (camera nhìn toàn khung, không di chuyển). Vui lòng tắt Ghim camera để dùng Zoom theo vật thể.'); else updateObject(object.objectId, { zoomFollow: !object.settings.zoomFollow }) }}>⌖</button>
+              <button type="button" title="Đẩy vào khung" aria-label="Đẩy vào khung" aria-pressed={object.settings.pushEntry.enabled} onClick={(event) => { event.stopPropagation(); updateObject(object.objectId, { pushEntry: { ...object.settings.pushEntry, enabled: !object.settings.pushEntry.enabled } }) }}><ArrowSquareIn size={13} weight="bold" /></button>
+              <button type="button" title="Zoom theo vật thể" aria-label="Zoom theo vật thể" aria-pressed={object.settings.zoomFollow} onClick={(event) => { event.stopPropagation(); if (frame.settings.cameraPinned && !object.settings.zoomFollow) window.alert('Ghim camera đang bật (camera nhìn toàn khung, không di chuyển). Vui lòng tắt Ghim camera để dùng Zoom theo vật thể.'); else updateObject(object.objectId, { zoomFollow: !object.settings.zoomFollow }) }}><FrameCorners size={13} weight="bold" /></button>
             </span>
           </article>)}
         </div>
 
-        {expandedGroupId && frame.objects.find((object) => object.objectId === expandedGroupId)?.groupMembers && <div className="group-members"><b>Vật thể trong nhóm</b>{frame.objects.find((object) => object.objectId === expandedGroupId)!.groupMembers!.map((member) => <button key={member.objectId} type="button" onClick={() => splitObject(expandedGroupId, member.objectId)}>Tách #{member.settings.order + 1}</button>)}</div>}
+        {expandedGroupId && frame.objects.find((object) => object.objectId === expandedGroupId)?.groupMembers && <div className="group-members"><div className="group-members-heading"><b>Lần gom gần nhất</b><button type="button" onClick={() => ungroupObject(expandedGroupId)}><StackMinus size={14} weight="bold" /> Tách nhóm</button></div>{frame.objects.find((object) => object.objectId === expandedGroupId)!.groupMembers!.map((member, index) => <div className="group-member" key={member.objectId}><span>{index + 1}</span><ObjectThumbnail analysis={analysis} object={member} /><div><b>{member.groupMembers?.length ? `Nhóm ${member.groupMembers.length} vật thể` : `Vật thể ${member.settings.kindOverride ?? member.kind}`}</b><small>{member.bbox.w}×{member.bbox.h}px</small></div>{member.groupMembers?.length ? <StackPlus size={14} weight="bold" /> : null}</div>)}</div>}
 
         {selected && <div className="object-detail">
           <div className="object-detail-heading"><span>Thiết lập vật thể #{selected.settings.order + 1}</span><small>ID {selected.objectId}</small></div>
@@ -231,6 +232,18 @@ function ObjectThumbnail({ analysis, object }: { analysis: Analysis | null; obje
     context.putImageData(data, 0, 0)
   }, [analysis, object])
   return <canvas ref={ref} className="object-thumb" aria-hidden="true" />
+}
+
+function ObjectOrderInput({ object, count, commit }: { object: FrameObject; count: number; commit: (objectId: string, order: number) => void }) {
+  const [draft, setDraft] = useState(String(object.settings.order + 1))
+  useEffect(() => setDraft(String(object.settings.order + 1)), [object.settings.order])
+  const apply = () => {
+    const parsed = Number.parseInt(draft, 10)
+    const next = Number.isFinite(parsed) ? Math.max(1, Math.min(count, parsed)) : object.settings.order + 1
+    setDraft(String(next))
+    if (next !== object.settings.order + 1) commit(object.objectId, next - 1)
+  }
+  return <label className="object-order" title="Nhập thứ tự mới rồi nhấn Enter" onClick={(event) => event.stopPropagation()}><span>Thứ tự</span><input aria-label={`Thứ tự vật thể ${object.settings.order + 1}`} type="number" min="1" max={count} value={draft} onChange={(event) => setDraft(event.target.value)} onBlur={apply} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); apply(); event.currentTarget.blur() } }} /></label>
 }
 
 function formatSec(value: number) { return `${Math.round(value * 10) / 10}s` }

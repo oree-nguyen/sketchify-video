@@ -358,6 +358,40 @@ export function splitFrameObject(frame: Frame, analysis: Analysis, objectId: str
   return { frame: syncFrameDuration({ ...frame, objects: normalized, analysis: { ...analysis, blocks, units, stats: { ...analysis.stats, blocks: blocks.length } } }), analysis: { ...analysis, blocks, units, stats: { ...analysis.stats, blocks: blocks.length } } }
 }
 
+/** Undo exactly the most recent merge operation for one group.
+ * Nested groups remain grouped, so (a-b)-c-d becomes a-b, c, d.
+ */
+export function ungroupFrameObject(frame: Frame, analysis: Analysis, objectId: string): { frame: Frame; analysis: Analysis; objectIds: string[] } | null {
+  const grouped = frame.objects.find((object) => object.objectId === objectId)
+  if (!grouped?.groupMembers?.length) return null
+  const insertionOrder = grouped.settings.order
+  const restoredMembers = grouped.groupMembers.map((member, index) => ({
+    ...member,
+    settings: { ...member.settings, order: insertionOrder + index },
+  }))
+  const objects = [...frame.objects.filter((object) => object.objectId !== objectId), ...restoredMembers]
+    .sort((a, b) => a.settings.order - b.settings.order)
+    .map((object, order) => ({ ...object, settings: { ...object.settings, order } }))
+  const memberBlockIds = new Set(restoredMembers.map((member) => member.blockId))
+  const blocks = [
+    ...analysis.blocks.filter((block) => block.id !== grouped.blockId && !memberBlockIds.has(block.id)),
+    ...(grouped.groupBlocks ?? []),
+  ].sort((a, b) => {
+    const ao = objects.find((object) => object.blockId === a.id)?.settings.order ?? Number.MAX_SAFE_INTEGER
+    const bo = objects.find((object) => object.blockId === b.id)?.settings.order ?? Number.MAX_SAFE_INTEGER
+    return ao - bo
+  })
+  const restoredUnits = Object.values(grouped.groupUnitsByMember ?? {}).flat()
+  const units = [...analysis.units.filter((unit) => unit.blockId !== grouped.blockId), ...restoredUnits]
+    .sort((a, b) => a.t0 - b.t0)
+  const nextAnalysis: Analysis = { ...analysis, blocks, units, stats: { ...analysis.stats, blocks: blocks.length } }
+  return {
+    objectIds: restoredMembers.map((member) => member.objectId),
+    frame: syncFrameDuration({ ...frame, objects, analysis: nextAnalysis }),
+    analysis: nextAnalysis,
+  }
+}
+
 export function reorderFrameObjects(frame: Frame, fromObjectId: string, toObjectId: string): Frame {
   const objects = [...frame.objects].sort((a, b) => a.settings.order - b.settings.order)
   const from = objects.findIndex((object) => object.objectId === fromObjectId)

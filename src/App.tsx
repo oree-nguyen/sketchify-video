@@ -10,7 +10,7 @@ import { beginPollinationsAuth, consumeAuthCallbackResult, disconnectPollination
 import { generateImage as pollinationsGenerateImage, generateSpeech, generateStoryScript } from './ai/pollinationsClient'
 import type { StoryProgress, StoryScene, StorySceneFailure } from './ai/types'
 import { ProjectPlayer } from './render/ProjectPlayer'
-import { createEmptyProject, createFrame, createFrameFromSource, frameDrawDurationSec, mergeFrameObjects, objectDropInsertionIndex, reconcileFrameObjects, setFrameCamera, setFrameCameraPinned, setFrameHold, setFramePageZoom, setFramePauseSettings, setFrameTransition, setObjectDuration, setObjectEffect, setObjectOrder, setObjectPush, setObjectZoomFollow, splitFrameObject, syncFrameDuration, type AudioClip, type Frame, type ObjectSettings, type Project, type SubtitleSettings } from './state/projectStore'
+import { createEmptyProject, createFrame, createFrameFromSource, frameDrawDurationSec, mergeFrameObjects, objectDropInsertionIndex, reconcileFrameObjects, setFrameCamera, setFrameCameraPinned, setFrameHold, setFramePageZoom, setFramePauseSettings, setFrameTransition, setObjectDuration, setObjectEffect, setObjectOrder, setObjectPush, setObjectZoomFollow, syncFrameDuration, ungroupFrameObject, type AudioClip, type Frame, type ObjectSettings, type Project, type SubtitleSettings } from './state/projectStore'
 import type { FrameSettings } from './state/settingsDefaults'
 import { buildProjectTimeline } from './timeline/projectTimeline'
 import { analyzeImage, type Analysis } from './wasm/wasmClient'
@@ -266,13 +266,13 @@ export default function App() {
     setSelectedObjectId(result.objectId)
     setSelectedObjectIds([result.objectId])
   }
-  const splitSelectedObject = (memberId: string) => {
-    if (!active || !analysis || !selectedObjectId) return
-    const result = splitFrameObject(active, analysis, selectedObjectId, memberId)
+  const ungroupObject = (groupId: string) => {
+    if (!active || !analysis) return
+    const result = ungroupFrameObject(active, analysis, groupId)
     if (!result) return
     setAnalyses((current) => ({ ...current, [active.id]: result.analysis }))
     setProject((current) => ({ ...current, frames: current.frames.map((frame) => frame.id === active.id ? result.frame : frame) }))
-    setSelectedObjectId(memberId); setSelectedObjectIds([memberId])
+    setSelectedObjectId(result.objectIds[0] ?? null); setSelectedObjectIds(result.objectIds)
   }
 
   const createNarration = async (text: string, voiceId: string, speed: number) => {
@@ -621,7 +621,7 @@ export default function App() {
           ? <SubtitlePanel settings={project.subtitle} update={updateSubtitle} />
           : panel === 'hand' || !active
           ? <HandPanel style={project.handStyle} setStyle={(handStyle) => setProject((current) => ({ ...current, handStyle }))} />
-          : <EditPanel frame={active} analysis={analysis} last={project.frames.at(-1)?.id === active.id} scope={editScope} setScope={setEditScope} selectedObjectId={selectedObjectId} selectedObjectIds={selectedObjectIds} selectObject={selectOnlyObject} toggleObjectSelection={toggleObjectSelection} groupSelectedObjects={groupSelectedObjects} splitObject={(groupId, memberId) => { if (!active || !analysis) return; const result = splitFrameObject(active, analysis, groupId, memberId); if (!result) return; setAnalyses((current) => ({ ...current, [active.id]: result.analysis })); setProject((current) => ({ ...current, frames: current.frames.map((frame) => frame.id === active.id ? result.frame : frame) })); selectOnlyObject(memberId) }} updateFrameSettings={updateFrameSettings} updateTransition={updateTransition} updateObject={updateObject} reorderObject={reorderObject} setObjectOrderDirect={setObjectOrderDirect} audioClip={project.audioClips.find((clip) => clip.frameId === active.id)} removeAudio={removeActiveAudio} removeFrame={removeActiveFrame} />}
+          : <EditPanel frame={active} analysis={analysis} last={project.frames.at(-1)?.id === active.id} scope={editScope} setScope={setEditScope} selectedObjectId={selectedObjectId} selectedObjectIds={selectedObjectIds} selectObject={selectOnlyObject} toggleObjectSelection={toggleObjectSelection} groupSelectedObjects={groupSelectedObjects} ungroupObject={ungroupObject} updateFrameSettings={updateFrameSettings} updateTransition={updateTransition} updateObject={updateObject} reorderObject={reorderObject} setObjectOrderDirect={setObjectOrderDirect} audioClip={project.audioClips.find((clip) => clip.frameId === active.id)} removeAudio={removeActiveAudio} removeFrame={removeActiveFrame} />}
         </div>
       </aside>
     </section>

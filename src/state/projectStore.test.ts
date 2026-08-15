@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_SETTINGS } from './settingsDefaults'
-import { DEFAULT_SUBTITLE_SETTINGS, frameDrawDurationSec, frameDurationSec, mergeFrameObjects, objectDropInsertionIndex, reconcileFrameObjects, reorderFrameObjects, retimeAnalysisForFrame, setFrameCameraPinned, setObjectOrder, setObjectZoomFollow, updateObjectSettings, type Frame, type Project } from './projectStore'
+import { DEFAULT_SUBTITLE_SETTINGS, frameDrawDurationSec, frameDurationSec, mergeFrameObjects, objectDropInsertionIndex, reconcileFrameObjects, reorderFrameObjects, retimeAnalysisForFrame, setFrameCameraPinned, setObjectOrder, setObjectZoomFollow, ungroupFrameObject, updateObjectSettings, type Frame, type Project } from './projectStore'
 import type { Analysis, Block } from '../wasm/wasmClient'
 
 const block = (id: number, x: number): Block => ({
@@ -95,5 +95,23 @@ describe('FrameObject contract', () => {
     expect(result!.analysis.blocks.find((item) => item.id === 10)?.bbox).toEqual({ x: 0, y: 0, w: 24, h: 10 })
     expect(result!.analysis.units.filter((unit) => unit.blockId === 10)).toHaveLength(4)
     expect(result!.frame.objects[0].settings.drawDurationSec).toBe(4)
+  })
+
+  it('tách nhóm hoàn tác đúng một lần gom và giữ nguyên nhóm con', () => {
+    const frame = makeFrame(6, [block(10, 0), block(20, 14), block(30, 40), block(40, 60)])
+    const source = analysis([block(10, 0), block(20, 14), block(30, 40), block(40, 60)])
+    const first = mergeFrameObjects(frame, source, [frame.objects[0].objectId, frame.objects[1].objectId])!
+    const groupAB = first.frame.objects.find((object) => object.groupMembers)?.objectId
+    expect(groupAB).toBeTruthy()
+    const outer = mergeFrameObjects(first.frame, first.analysis, first.frame.objects.map((object) => object.objectId))!
+    expect(outer.frame.objects).toHaveLength(1)
+    expect(outer.frame.objects[0].groupMembers).toHaveLength(3)
+    const undoOuter = ungroupFrameObject(outer.frame, outer.analysis, outer.objectId)!
+    expect(undoOuter.frame.objects).toHaveLength(3)
+    const restoredAB = undoOuter.frame.objects.find((object) => object.objectId === groupAB)
+    expect(restoredAB?.groupMembers).toHaveLength(2)
+    const undoAB = ungroupFrameObject(undoOuter.frame, undoOuter.analysis, groupAB!)!
+    expect(undoAB.frame.objects).toHaveLength(4)
+    expect(undoAB.frame.objects.every((object) => !object.groupMembers)).toBe(true)
   })
 })
