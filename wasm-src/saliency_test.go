@@ -50,10 +50,48 @@ func TestComplexProjectFixturesUseSaliency(t *testing.T) {
 				t.Fatalf("saliency did not separate the standard result: saliency=%d standard=%d", len(result.Blocks), len(standard.Blocks))
 			}
 			t.Logf("mode=%s blocks=%d standardBlocks=%d variance=%.2f entropy=%.2f threshold=%d", result.SegmentationMode, len(result.Blocks), len(standard.Blocks), result.BackgroundVariance, result.BackgroundEntropy, result.SaliencyThreshold)
+			if len(result.Blocks) < 8 || len(result.Blocks) > 24 {
+				t.Fatalf("implausible proposal count: %d", len(result.Blocks))
+			}
+			for _, block := range result.Blocks {
+				areaRatio := float64(block.BBox.W*block.BBox.H) / float64(w*h)
+				if areaRatio > .20 {
+					t.Fatalf("runaway block spans %.1f%% of canvas: %+v", areaRatio*100, block.BBox)
+				}
+				if areaRatio < .004 {
+					t.Fatalf("fragment block spans only %.2f%% of canvas: %+v", areaRatio*100, block.BBox)
+				}
+			}
 			if os.Getenv("SKETCHIFY_WRITE_FIXTURES") == "1" {
 				writeBlockOverlay(t, filepath.Join("..", fmt.Sprintf(".tmp-saliency-%d.png", index)), rgba, w, h, result.Blocks)
+				writeGrayMap(t, filepath.Join("..", fmt.Sprintf(".tmp-saliency-map-%d.png", index)), result.Saliency, w, h)
 			}
 		})
+	}
+}
+
+func TestFrequencyBoxBlurWrapsAtBorders(t *testing.T) {
+	input := make([]float64, 8*8)
+	input[0] = 9
+	blurred := boxBlur3(input, 8, 8)
+	for _, pixel := range []int{0, 7, 7 * 8, 7*8 + 7} {
+		if blurred[pixel] != 1 {
+			t.Fatalf("periodic neighbour %d = %v, want 1", pixel, blurred[pixel])
+		}
+	}
+}
+
+func writeGrayMap(t *testing.T, path string, values []uint8, w, h int) {
+	t.Helper()
+	canvas := image.NewGray(image.Rect(0, 0, w, h))
+	copy(canvas.Pix, values)
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if err := png.Encode(file, canvas); err != nil {
+		t.Fatal(err)
 	}
 }
 

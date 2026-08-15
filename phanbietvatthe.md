@@ -87,7 +87,9 @@ Nhánh nền phức tạp dùng thuật toán Hou–Zhang thuần toán học:
 7. Nội suy song tuyến tính về kích thước WorkImage, chuẩn hóa 0..255.
 8. Ngưỡng được lấy theo percentile của chính ảnh, mặc định percentile 75.
 
-Thử nghiệm cho thấy phép `ink_old OR saliency` nguyên văn vẫn giữ toàn bộ vùng “khác một màu nền” và làm các ảnh sân bay thành một Block khổng lồ. Vì vậy nhánh phức tạp giữ phần Sobel của mask cũ, nhưng chỉ nhận cạnh nằm trong vùng hỗ trợ saliency, cộng với lõi saliency vượt ngưỡng. Các hạt saliency được nối ở bán kính rất nhỏ, thích ứng khoảng `workingWidth/480` đến `workingWidth/320`, chỉ để CCL không vỡ thành hàng trăm mảnh; pixel nối không được đưa vào nội dung Block. Block quá lớn còn được kiểm tra projection profile ngang/dọc để cắt tại valley sâu nếu hai phía đều đủ mực, nhằm loại cầu nối mảnh. Nhánh nền đơn giản không thay đổi.
+Thử nghiệm cho thấy phép `ink_old OR saliency` nguyên văn vẫn giữ toàn bộ vùng “khác một màu nền” và làm các ảnh sân bay thành một Block khổng lồ. Vì vậy nhánh phức tạp giữ phần Sobel của mask cũ, nhưng chỉ nhận cạnh nằm trong vùng hỗ trợ saliency, cộng với lõi saliency vượt ngưỡng. Bộ lọc trung bình trên mặt phẳng FFT dùng biên tuần hoàn; kẹp biên như ảnh không gian sẽ sinh một dải chéo giả sau IFFT.
+
+Các cực đại saliency sau đó được khử cực đại lân cận để tạo seed thưa. Pixel chỉ được gán cho seed gần nhất khi đồng thời thuộc ink mask và nằm trong **support band saliency**; vì thế nền texture không còn bị chia thành các ô Voronoi phủ kín canvas. Các cell thực sự chồng lấn mạnh theo cả hai chiều mới được gộp, đồng thời union box phải đủ đặc. Việc chỉ chạm cạnh hoặc nối bằng một dải mảnh không đủ điều kiện, nên tránh được chaining. Nếu ảnh không sinh được seed hợp lệ, pipeline mới fallback sang CCL. Nhánh nền đơn giản vẫn dùng đúng pipeline chuẩn cũ.
 
 ## 4. Tạo Ink mask
 
@@ -457,7 +459,7 @@ Các test Go quan trọng nằm trong `wasm-src/imaging_test.go`, bao gồm Gray
 |---|---|
 | Gray, Sobel, nền, ink mask, morphology | `wasm-src/imaging.go` |
 | Variance/entropy nền, FFT và spectral saliency | `wasm-src/saliency.go` |
-| Cắt cầu nối mảnh trong Block saliency quá lớn | `wasm-src/saliency_split.go` |
+| Seed, phân vùng support-band và gộp chống chaining | `wasm-src/saliency_groups.go` |
 | CCL, tạo Block, gom chữ, lọc, thứ tự | `wasm-src/segment.go` |
 | Median-cut và phân loại vector/photo | `wasm-src/classify.go` |
 | Contour, RDP, DrawUnit path | `wasm-src/vector.go` |

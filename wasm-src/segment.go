@@ -113,7 +113,24 @@ func Analyze(rgba []byte, w, h int, s Settings) AnalysisResult {
 		linkRadius = maxInt(linkRadius, saliencyLinkRadius)
 	}
 	dilated := DilateSquare(fine, w, h, linkRadius)
-	labels, _ := Components(dilated, w, h)
+	labels := make([]int, w*h)
+	for i := range labels {
+		labels[i] = -1
+	}
+	if mode == "saliency" {
+		groups := SaliencyMarkerGroups(fine, saliency, w, h, s.MinBlockInk)
+		if len(groups) == 0 {
+			labels, _ = Components(dilated, w, h)
+		} else {
+			for id, pixels := range groups {
+				for _, pixel := range pixels {
+					labels[pixel] = id
+				}
+			}
+		}
+	} else {
+		labels, _ = Components(dilated, w, h)
+	}
 	blocks := map[int]*Block{}
 	for p, on := range fine {
 		if on == 0 || labels[p] < 0 {
@@ -153,7 +170,7 @@ func Analyze(rgba []byte, w, h int, s Settings) AnalysisResult {
 		out = append(out, *b)
 	}
 	if mode == "saliency" {
-		out = SplitOversizedSaliencyBlocks(out, rgba, w, h, s)
+		out = MergeOverlappingSaliencyBlocks(out, rgba, w, h, s)
 	}
 	out = MergeTextBlocks(out, rgba, w, h)
 	filtered := out[:0]

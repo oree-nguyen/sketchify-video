@@ -167,7 +167,10 @@ func boxBlur3(input []float64, w, h int) []float64 {
 			sum, count := 0.0, 0.0
 			for dy := -1; dy <= 1; dy++ {
 				for dx := -1; dx <= 1; dx++ {
-					nx, ny := minInt(w-1, maxInt(0, x+dx)), minInt(h-1, maxInt(0, y+dy))
+					// The FFT plane is periodic. Clamping at its borders creates an
+					// artificial diagonal ramp after IFFT, which used to dominate the
+					// saliency map on every 16:9 fixture.
+					nx, ny := (x+dx+w)%w, (y+dy+h)%h
 					sum += input[ny*w+nx]
 					count++
 				}
