@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestBackgroundComplexityChoosesExpectedPipeline(t *testing.T) {
@@ -39,7 +40,9 @@ func TestComplexProjectFixturesUseSaliency(t *testing.T) {
 		name := fmt.Sprintf("testthuattoanmoi (%d).png", index)
 		t.Run(name, func(t *testing.T) {
 			rgba, w, h := loadProjectPNG(t, filepath.Join("..", name), 960)
+			started := time.Now()
 			result := Analyze(rgba, w, h, DefaultSettings())
+			elapsed := time.Since(started)
 			standardSettings := DefaultSettings()
 			standardSettings.SegmentationMode = "standard"
 			standard := Analyze(rgba, w, h, standardSettings)
@@ -49,7 +52,7 @@ func TestComplexProjectFixturesUseSaliency(t *testing.T) {
 			if len(result.Blocks) <= len(standard.Blocks) {
 				t.Fatalf("saliency did not separate the standard result: saliency=%d standard=%d", len(result.Blocks), len(standard.Blocks))
 			}
-			t.Logf("mode=%s blocks=%d standardBlocks=%d variance=%.2f entropy=%.2f threshold=%d", result.SegmentationMode, len(result.Blocks), len(standard.Blocks), result.BackgroundVariance, result.BackgroundEntropy, result.SaliencyThreshold)
+			t.Logf("mode=%s blocks=%d standardBlocks=%d variance=%.2f entropy=%.2f threshold=%d analyze=%s", result.SegmentationMode, len(result.Blocks), len(standard.Blocks), result.BackgroundVariance, result.BackgroundEntropy, result.SaliencyThreshold, elapsed)
 			if len(result.Blocks) < 8 || len(result.Blocks) > 24 {
 				t.Fatalf("implausible proposal count: %d", len(result.Blocks))
 			}
@@ -62,11 +65,49 @@ func TestComplexProjectFixturesUseSaliency(t *testing.T) {
 					t.Fatalf("fragment block spans only %.2f%% of canvas: %+v", areaRatio*100, block.BBox)
 				}
 			}
+			assertCompletePixelPartition(t, result.Blocks, w*h)
+			units := BuildUnits(rgba, w, result.Blocks, DefaultSettings())
+			assertCompleteUnitCoverage(t, units, w*h)
 			if os.Getenv("SKETCHIFY_WRITE_FIXTURES") == "1" {
 				writeBlockOverlay(t, filepath.Join("..", fmt.Sprintf(".tmp-saliency-%d.png", index)), rgba, w, h, result.Blocks)
 				writeGrayMap(t, filepath.Join("..", fmt.Sprintf(".tmp-saliency-map-%d.png", index)), result.Saliency, w, h)
 			}
 		})
+	}
+}
+
+func assertCompletePixelPartition(t *testing.T, blocks []Block, pixelCount int) {
+	t.Helper()
+	seen := make([]uint8, pixelCount)
+	for _, block := range blocks {
+		for _, pixel := range block.Pixels {
+			if pixel < 0 || pixel >= pixelCount {
+				t.Fatalf("block pixel outside image: %d", pixel)
+			}
+			seen[pixel]++
+		}
+	}
+	for pixel, count := range seen {
+		if count != 1 {
+			t.Fatalf("pixel %d belongs to %d blocks, want exactly 1", pixel, count)
+		}
+	}
+}
+
+func assertCompleteUnitCoverage(t *testing.T, units []DrawUnit, pixelCount int) {
+	t.Helper()
+	seen := make([]uint8, pixelCount)
+	for _, unit := range units {
+		for _, pixel := range unit.Pixels {
+			if pixel >= 0 && pixel < pixelCount {
+				seen[pixel]++
+			}
+		}
+	}
+	for pixel, count := range seen {
+		if count != 1 {
+			t.Fatalf("pixel %d belongs to %d DrawUnits, want exactly 1", pixel, count)
+		}
 	}
 }
 

@@ -69,7 +69,7 @@ func Components(mask []uint8, w, h int) ([]int, [][]int) {
 // Analyze là pipeline Tầng 0-2: ink→opening→dilate→CCL→lọc→sắp thứ tự.
 func Analyze(rgba []byte, w, h int, s Settings) AnalysisResult {
 	bg := EstimateBackground(rgba, w, h)
-	fine := InkMask(rgba, w, h, s, bg)
+	fine := CascadeStage1(rgba, w, h, s, bg)
 	variance, entropy := BackgroundComplexity(rgba, w, h)
 	mode := s.SegmentationMode
 	if mode != "standard" && mode != "saliency" {
@@ -84,18 +84,39 @@ func Analyze(rgba []byte, w, h int, s Settings) AnalysisResult {
 	if mode == "saliency" {
 		saliency = SpectralResidualSaliency(Gray(rgba), w, h)
 		saliencyThreshold = PercentileThreshold(saliency, s.SaliencyPercentile)
-		// Với nền phức tạp, thành phần "khác một màu nền viền" của InkMask cũ gần
-		// như phủ toàn ảnh. OR trực tiếp thành phần đó với saliency sẽ tạo một Block
-		// khổng lồ. Giữ nhánh Sobel ổn định của mask cũ rồi dùng saliency bổ sung
-		// phần đặc bên trong vùng nổi bật; nhánh nền đơn giản phía trên không đổi.
-		edges := SobelMagnitude(Gray(rgba), w, h)
-		supportThreshold := PercentileThreshold(saliency, mathMax(45, s.SaliencyPercentile-30))
-		for i := range fine {
-			fine[i] = 0
-			if saliency[i] > saliencyThreshold || (saliency[i] > supportThreshold && int(edges[i]) > s.EdgeThreshold) {
-				fine[i] = 1
+		stage2 := CascadeStage2(fine, saliency, saliencyThreshold, s)
+		stage3 := CascadeStage3(stage2, saliency, w, h, s.SaliencyPercentile, s)
+		regions, seedCount, coverage := CascadeStage4(rgba, w, h, stage3, saliency, s)
+		coreBoxes := make([]Rect, minInt(seedCount, len(regions)))
+		coreCentroids := make([][2]float64, len(coreBoxes))
+		for i := range coreBoxes {
+			coreBoxes[i] = bboxForPixels(regions[i], w)
+			x, y := 0.0, 0.0
+			for _, pixel := range regions[i] {
+				x += float64(pixel % w)
+				y += float64(pixel / w)
 			}
+			coreCentroids[i] = [2]float64{x / float64(len(regions[i])), y / float64(len(regions[i]))}
 		}
+		regions = CascadeStage5(regions, seedCount, rgba, w, h, s)
+		out := make([]Block, 0, len(regions))
+		for i, pixels := range regions {
+			if len(pixels) == 0 {
+				continue
+			}
+			block := blockFromPixels(pixels, rgba, w, s)
+			if i < len(coreBoxes) {
+				block.BBox = coreBoxes[i]
+				block.CentroidX, block.CentroidY = coreCentroids[i][0], coreCentroids[i][1]
+				block.Kind = ClassifyBlock(rgba, w, block, s)
+			}
+			out = append(out, block)
+		}
+		OrderBlocks(out, s.OrderMode, s.RowThresholdFactor)
+		for i := range out {
+			out[i].ID = i
+		}
+		return AnalysisResult{Background: bg, Blocks: out, EffectiveMergeRadius: 0, OpeningApplied: false, Ink: coverage, Saliency: saliency, SegmentationMode: mode, BackgroundVariance: variance, BackgroundEntropy: entropy, SaliencyThreshold: saliencyThreshold}
 	}
 	fine = DilateSquare(ErodeSquare(fine, w, h, 1), w, h, 1)
 	// rgba đã được resize về ảnh làm việc trước khi vào WASM. Scale bán kính theo
@@ -103,34 +124,8 @@ func Analyze(rgba []byte, w, h int, s Settings) AnalysisResult {
 	// ảnh 480px và vô tình nối các vật thể cách nhau chỉ vài pixel.
 	r := effectiveMergeRadius(s.MergeRadius, w)
 	linkRadius := r
-	if mode == "saliency" {
-		// Chỉ nối các hạt saliency ở tỉ lệ nhỏ; pixel dilation không được đưa vào
-		// Block, nó chỉ hỗ trợ nhãn CCL giống cơ chế merge hiện có.
-		saliencyLinkRadius := maxInt(1, w/480)
-		if variance >= s.BGVarianceThreshold*3 {
-			saliencyLinkRadius = maxInt(saliencyLinkRadius, maxInt(1, w/320))
-		}
-		linkRadius = maxInt(linkRadius, saliencyLinkRadius)
-	}
 	dilated := DilateSquare(fine, w, h, linkRadius)
-	labels := make([]int, w*h)
-	for i := range labels {
-		labels[i] = -1
-	}
-	if mode == "saliency" {
-		groups := SaliencyMarkerGroups(fine, saliency, w, h, s.MinBlockInk)
-		if len(groups) == 0 {
-			labels, _ = Components(dilated, w, h)
-		} else {
-			for id, pixels := range groups {
-				for _, pixel := range pixels {
-					labels[pixel] = id
-				}
-			}
-		}
-	} else {
-		labels, _ = Components(dilated, w, h)
-	}
+	labels, _ := Components(dilated, w, h)
 	blocks := map[int]*Block{}
 	for p, on := range fine {
 		if on == 0 || labels[p] < 0 {
@@ -168,9 +163,6 @@ func Analyze(rgba []byte, w, h int, s Settings) AnalysisResult {
 		b.CentroidY /= float64(b.InkArea)
 		b.Kind = ClassifyBlock(rgba, w, *b, s)
 		out = append(out, *b)
-	}
-	if mode == "saliency" {
-		out = MergeOverlappingSaliencyBlocks(out, rgba, w, h, s)
 	}
 	out = MergeTextBlocks(out, rgba, w, h)
 	filtered := out[:0]

@@ -61,8 +61,11 @@ export class Player {
           if(!usesStandardReveal(objectSettings)){
             const own=units.filter(unit=>unit.blockId===u.blockId),end=Math.max(...own.map(unit=>unit.t1))
             if(progress<end)break
-            const block=this.options.analysis.blocks.find(candidate=>candidate.id===u.blockId)
-            if(block){const tile=blockTiles.get(u.blockId)??getBlockTile(block,img.rgba,img.bg,w);blockTiles.set(u.blockId,tile);ctx.save();ctx.globalAlpha=1;ctx.drawImage(tile,block.bbox.x,block.bbox.y);ctx.restore()}
+            // The visible push tile uses the object's core bbox, but a cascade
+            // block can also own residual background pixels outside that core.
+            // Commit every real DrawUnit at the end so push mode preserves the
+            // same 100% final-image contract as standard reveal.
+            for(const completed of own)blitFullUnit(ctx,getUnitTile(completed,img.rgba,img.bg,w),completed)
             while(unitCursor<units.length&&units[unitCursor].blockId===u.blockId){unitAlpha[unitCursor]=1;unitCursor++}
             continue
           }

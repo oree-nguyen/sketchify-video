@@ -15,10 +15,11 @@ type Settings struct {
 	CustomOrder                                                                           []int
 	SegmentationMode                                                                      string
 	BGVarianceThreshold, BGEntropyThreshold, SaliencyPercentile                           float64
+	CascadeDebugMask, CascadeColorClusters                                                int
 }
 
 func DefaultSettings() Settings {
-	return Settings{WorkingWidth: 960, EdgeThreshold: 42, BGTolerance: 34, MergeRadius: 0, MinBlockInk: 60, RowThresholdFactor: .6, PhotoDensityThreshold: .0025, ProbeColors: 8, MinProbeRegion: 12, VectorPosterizeLevels: 8, PhotoColorClusters: 10, MinRegionArea: 40, OrderMode: "auto-row", SegmentationMode: "auto", BGVarianceThreshold: 15, BGEntropyThreshold: 2.5, SaliencyPercentile: 75}
+	return Settings{WorkingWidth: 960, EdgeThreshold: 42, BGTolerance: 34, MergeRadius: 0, MinBlockInk: 60, RowThresholdFactor: .6, PhotoDensityThreshold: .0025, ProbeColors: 8, MinProbeRegion: 12, VectorPosterizeLevels: 8, PhotoColorClusters: 10, MinRegionArea: 40, OrderMode: "auto-row", SegmentationMode: "auto", BGVarianceThreshold: 15, BGEntropyThreshold: 2.5, SaliencyPercentile: 75, CascadeDebugMask: 31, CascadeColorClusters: 8}
 }
 
 // Gray chuyển RGBA sang độ sáng; input/output tuyến tính O(w*h).

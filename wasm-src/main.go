@@ -131,5 +131,11 @@ func settingsFromJS(v js.Value) Settings {
 	if n := v.Get("saliencyPercentile"); n.Type() == js.TypeNumber {
 		s.SaliencyPercentile = n.Float()
 	}
+	if n := v.Get("cascadeDebugMask"); n.Type() == js.TypeNumber {
+		s.CascadeDebugMask = n.Int() & 31
+	}
+	if n := v.Get("cascadeColorClusters"); n.Type() == js.TypeNumber {
+		s.CascadeColorClusters = maxInt(2, minInt(16, n.Int()))
+	}
 	return s
 }
