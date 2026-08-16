@@ -264,7 +264,8 @@ export function reconcileFrameObjects(frameId: number, blocks: Block[], previous
   return matched.sort((a, b) => a.settings.order - b.settings.order).map((object, order) => ({ ...object, settings: { ...object.settings, order } }))
 }
 
-export function frameDrawDurationSec(frame: Pick<Frame, 'objects'>): number {
+export function frameDrawDurationSec(frame: Pick<Frame, 'objects' | 'settings'>): number {
+  if (frame.settings.rasterWipe?.enabled) return Math.max(.1, frame.settings.rasterWipeDurationSec)
   return frame.objects.reduce((total, object) => total + Math.max(.05, object.settings.drawDurationSec), 0)
 }
 

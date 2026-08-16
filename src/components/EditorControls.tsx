@@ -29,6 +29,13 @@ const pushHandOptions: Array<{ value: PushHandStyle; label: string }> = [
   { value: 'auto', label: 'Tự động theo hướng' },
   ...(['1', '2', '3', '4', '5', '6'] as PushHandStyle[]).map((value) => ({ value, label: `Tay đẩy số ${value}` })),
 ]
+const rasterWipeOptions: Array<{ value: 'off' | NonNullable<FrameSettings['rasterWipe']>['direction']; label: string }> = [
+  { value: 'off', label: 'Tắt · vẽ theo vật thể' },
+  { value: 'ttb', label: 'Trên xuống dưới' },
+  { value: 'ltr', label: 'Trái sang phải' },
+  { value: 'rtl', label: 'Phải sang trái' },
+  { value: 'btt', label: 'Dưới lên trên' },
+]
 
 export function HandPanel({ style, setStyle }: { style: HandStyleId; setStyle: (id: HandStyleId) => void }) {
   return <>
@@ -68,6 +75,8 @@ export function EditPanel({ frame, analysis, last, scope, setScope, selectedObje
   const draggedObjectId = useRef<string | null>(null)
   const dropElement = useRef<HTMLElement | null>(null)
   const drawDuration = frameDrawDurationSec(frame)
+  const rasterWipeActive = Boolean(frame.settings.rasterWipe?.enabled)
+  const effectiveScope = rasterWipeActive ? 'frame' : scope
   const zoomBlocks = frame.objects.filter((object) => object.settings.zoomFollow).map((object) => object.blockId)
   const cameraTimeline = analysis ? buildCameraTimeline(frame.settings, analysis.blocks, analysis.units, analysis.img.w, analysis.img.h, zoomBlocks, drawDuration) : null
   const selected = frame.objects.find((object) => object.objectId === selectedObjectId) ?? frame.objects[0]
@@ -77,11 +86,11 @@ export function EditPanel({ frame, analysis, last, scope, setScope, selectedObje
   return <>
     <div className="inspector-title"><span>ĐỊNH DẠNG</span><h2>Khung & vật thể</h2><p>{frame.name}</p></div>
     <div className="edit-scope-tabs" role="tablist" aria-label="Phạm vi thiết lập">
-      <button role="tab" aria-selected={scope === 'object'} className={scope === 'object' ? 'active' : ''} onClick={() => { setScope('object'); selectObject(selected?.objectId ?? null) }}>Vật thể <small>{frame.objects.length}</small></button>
-      <button role="tab" aria-selected={scope === 'frame'} className={scope === 'frame' ? 'active' : ''} onClick={() => { setScope('frame'); selectObject(null) }}>Khung hình</button>
+      {!rasterWipeActive && <button role="tab" aria-selected={effectiveScope === 'object'} className={effectiveScope === 'object' ? 'active' : ''} onClick={() => { setScope('object'); selectObject(selected?.objectId ?? null) }}>Vật thể <small>{frame.objects.length}</small></button>}
+      <button role="tab" aria-selected={effectiveScope === 'frame'} className={effectiveScope === 'frame' ? 'active' : ''} onClick={() => { setScope('frame'); selectObject(null) }}>Khung hình</button>
     </div>
     <div className="settings-accordion">
-      {scope === 'object' && <Accordion title="Vật thể" meta={`${frame.objects.length} · ${formatSec(drawDuration)} vẽ`} open>
+      {effectiveScope === 'object' && <Accordion title="Vật thể" meta={`${frame.objects.length} · ${formatSec(drawDuration)} vẽ`} open>
         {!frame.objects.length && <p className="empty-objects">Đang chờ kết quả phân tích để tạo danh sách vật thể…</p>}
         {frame.objects.length > 0 && <div className="object-group-toolbar"><span>{selectedObjectIds.length} vật thể đã chọn</span><div className="object-toolbar-icons"><button type="button" title="Gom nhóm (Ctrl+G)" aria-label="Gom nhóm" disabled={selectedObjectIds.length < 2} onClick={groupSelectedObjects}><StackPlus size={16} weight="bold" /></button><button type="button" title="Tách nhóm về lần gom gần nhất" aria-label="Tách nhóm" disabled={!selected?.groupMembers?.length} onClick={() => selected && ungroupObject(selected.objectId)}><StackMinus size={16} weight="bold" /></button><button type="button" title="Đẩy vật thể vào khung" aria-label="Đẩy vật thể vào khung" disabled={!selected} aria-pressed={selected?.settings.pushEntry.enabled} onClick={() => selected && updateObject(selected.objectId, { pushEntry: { ...selected.settings.pushEntry, enabled: !selected.settings.pushEntry.enabled } })}><ArrowSquareIn size={16} weight="bold" /></button><button type="button" title="Zoom theo vật thể" aria-label="Zoom theo vật thể" disabled={!selected} aria-pressed={selected?.settings.zoomFollow} onClick={() => selected && updateObject(selected.objectId, { zoomFollow: !selected.settings.zoomFollow })}><MagnifyingGlass size={16} weight="bold" /></button><button type="button" title={gridMode ? 'Xem dạng danh sách' : 'Xem dạng lưới'} aria-label={gridMode ? 'Xem dạng danh sách' : 'Xem dạng lưới'} aria-pressed={gridMode} onClick={() => setGridMode((value) => !value)}>{gridMode ? <ListBullets size={16} weight="bold" /> : <SquaresFour size={16} weight="bold" />}</button></div></div>}
         <div className={`object-list ${gridMode ? 'object-grid' : ''}`} aria-label="Danh sách vật thể">
@@ -126,15 +135,17 @@ export function EditPanel({ frame, analysis, last, scope, setScope, selectedObje
         </div>}
       </Accordion>}
 
-      {scope === 'frame' && <Accordion title="Khung hình" meta={`${formatSec(frameDurationSec(frame))} tổng`} open>
-        <div className="derived-duration"><span>Thời gian vẽ</span><b>{formatSec(drawDuration)}</b><small>Tự tính từ tổng thời gian của {frame.objects.length} vật thể.</small></div>
+      {effectiveScope === 'frame' && <Accordion title="Khung hình" meta={`${formatSec(frameDurationSec(frame))} tổng`} open>
+        <div className="derived-duration"><span>Thời gian vẽ</span><b>{formatSec(drawDuration)}</b><small>{rasterWipeActive ? 'Thời lượng quét toàn bộ ảnh.' : `Tự tính từ tổng thời gian của ${frame.objects.length} vật thể.`}</small></div>
+        <SelectMenu label="Cách vẽ khung hình" value={frame.settings.rasterWipe?.enabled ? frame.settings.rasterWipe.direction : 'off'} options={rasterWipeOptions} onChange={(value) => updateFrameSettings({ rasterWipe: value === 'off' ? null : { enabled: true, direction: value } })} />
+        {rasterWipeActive && <RangeField label="Thời gian quét" value={frame.settings.rasterWipeDurationSec} min={.5} max={60} step={.1} unit="s" onChange={(rasterWipeDurationSec) => updateFrameSettings({ rasterWipeDurationSec })} />}
         <RangeField label="Giữ khung" value={frame.settings.holdDurationSec} min={0} max={12} step={.1} unit="s" onChange={(holdDurationSec) => updateFrameSettings({ holdDurationSec })} />
         {frame.imageSource === 'ai-generated' && <div className="ai-frame-detail"><b>Ảnh do AI tạo</b><p>{frame.aiGeneration?.prompt}</p><small>{frame.aiGeneration?.generatedAt ? new Date(frame.aiGeneration.generatedAt).toLocaleString('vi-VN') : ''}</small></div>}
         {audioClip && <div className="ai-frame-detail"><b>Giọng đọc · {formatSec(audioClip.durationSec)}</b><p>{audioClip.narrationText}</p><audio controls src={audioClip.sourceUrl} /><button className="quiet" type="button" onClick={removeAudio}>Xoá giọng đọc</button></div>}
         <button className="danger-button" type="button" onClick={removeFrame}>Xoá khung hình</button>
       </Accordion>}
 
-      {scope === 'frame' && <Accordion title="04 · Phân tích ảnh" meta={frame.settings.segmentationMode === 'auto' ? 'Tự động' : frame.settings.segmentationMode === 'saliency' ? 'Saliency' : 'Chuẩn'}>
+      {effectiveScope === 'frame' && !rasterWipeActive && <Accordion title="04 · Phân tích ảnh" meta={frame.settings.segmentationMode === 'auto' ? 'Tự động' : frame.settings.segmentationMode === 'saliency' ? 'Saliency' : 'Chuẩn'}>
         <SelectMenu label="Thuật toán tách" value={frame.settings.segmentationMode} options={[
           { value: 'auto' as const, label: 'Tự động theo nền' },
           { value: 'standard' as const, label: 'Ép thuật toán chuẩn' },
@@ -150,7 +161,7 @@ export function EditPanel({ frame, analysis, last, scope, setScope, selectedObje
         </details>
       </Accordion>}
 
-      {scope === 'frame' && <Accordion title="07 · Nhịp nghỉ" meta={`${frame.settings.microPauseMs}/${frame.settings.groupPauseMs}ms`}>
+      {effectiveScope === 'frame' && !rasterWipeActive && <Accordion title="07 · Nhịp nghỉ" meta={`${frame.settings.microPauseMs}/${frame.settings.groupPauseMs}ms`}>
         <RangeField label="Nghỉ giữa vật thể-nhãn" value={frame.settings.microPauseMs} min={100} max={300} step={10} unit="ms" onChange={(microPauseMs) => updateFrameSettings({ microPauseMs })} />
         <RangeField label="Nghỉ khi chuyển ý khác" value={frame.settings.groupPauseMs} min={400} max={800} step={20} unit="ms" onChange={(groupPauseMs) => updateFrameSettings({ groupPauseMs })} />
         <details className="advanced-settings">
@@ -159,13 +170,14 @@ export function EditPanel({ frame, analysis, last, scope, setScope, selectedObje
         </details>
       </Accordion>}
 
-      {scope === 'frame' && <Accordion title="Camera" meta={cameraOptions.find((option) => option.value === frame.settings.camera.mode)?.label}>
+      {effectiveScope === 'frame' && <Accordion title="Camera" meta={cameraOptions.find((option) => option.value === frame.settings.camera.mode)?.label}>
         <ToggleRow label="Ghim camera" checked={frame.settings.cameraPinned} onChange={(cameraPinned) => { if (cameraPinned && frame.objects.some((object) => object.settings.zoomFollow)) window.alert('Đang có vật thể bật Zoom theo vật thể. Vui lòng tắt Zoom theo vật thể trước khi bật Ghim camera.'); else updateFrameSettings({ cameraPinned }) }} />
-        <SelectMenu label="Chế độ camera" value={frame.settings.camera.mode} options={cameraOptions} onChange={(mode) => updateFrameSettings({ camera: { ...frame.settings.camera, mode } })} />
+        <SelectMenu label="Chế độ camera" value={frame.settings.camera.mode} options={cameraOptions.map((option) => rasterWipeActive && (option.value === 'A-auto-follow' || option.value === 'B-manual-keyframe' || option.value === 'D-hybrid') ? { ...option, disabled: true, hint: 'Vẽ nguyên khung hình không có vật thể để camera bám theo.' } : option)} onChange={(mode) => updateFrameSettings({ camera: { ...frame.settings.camera, mode } })} />
+        {rasterWipeActive && <div className="camera-warning">Ở chế độ vẽ nguyên khung hình, A/B/D bị vô hiệu hoá vì không có vật thể riêng. Dùng C để zoom vào–ra, hoặc Tắt/Ghim camera để giữ toàn khung.</div>}
         {cameraTimeline?.fellBack && <div className="camera-warning">{cameraTimeline.reason}</div>}
       </Accordion>}
 
-      {scope === 'frame' && <Accordion title="Zoom trang" meta={frame.settings.pageZoom.enabled ? 'Bật' : 'Tắt'}>
+      {effectiveScope === 'frame' && <Accordion title="Zoom trang" meta={frame.settings.pageZoom.enabled ? 'Bật' : 'Tắt'}>
         <ToggleRow label="Zoom giữa các trang" checked={frame.settings.pageZoom.enabled} onChange={(enabled) => updateFrameSettings({ pageZoom: { ...frame.settings.pageZoom, enabled } })} />
         {frame.settings.pageZoom.enabled && <>
           <SelectMenu label="Cách gộp trang" value={frame.settings.pageZoom.mode} options={[
@@ -176,7 +188,7 @@ export function EditPanel({ frame, analysis, last, scope, setScope, selectedObje
         </>}
       </Accordion>}
 
-      {scope === 'frame' && !last && <Accordion title="Chuyển sang khung kế" meta={transitionOptions.find((option) => option.value === frame.transitionToNext.type)?.label}>
+      {effectiveScope === 'frame' && !last && <Accordion title="Chuyển sang khung kế" meta={transitionOptions.find((option) => option.value === frame.transitionToNext.type)?.label}>
         <div className="transition-list">{transitionOptions.map((option) => <button className={`transition-option ${frame.transitionToNext.type === option.value ? 'chosen' : ''}`} key={option.value} onClick={() => updateTransition({ type: option.value })}>
           <span><b>{option.label}</b><small>{option.hint}</small></span>
         </button>)}</div>

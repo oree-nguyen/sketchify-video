@@ -3,6 +3,7 @@ export type CameraMode = 'off'|'A-auto-follow'|'B-manual-keyframe'|'C-two-stage'
 export type PushEdge = 'auto'|'left'|'right'|'top'|'bottom'
 export type PageZoomMode = 'auto-rows'|'manual'
 export type SegmentationMode = 'auto'|'standard'|'saliency'
+export type RasterWipeDirection = 'ttb'|'ltr'|'rtl'|'btt'
 
 export interface FrameSettings {
   workingWidth:number; edgeThreshold:number; bgTolerance:number; mergeRadius:number; minBlockInk:number
@@ -16,6 +17,9 @@ export interface FrameSettings {
   pageZoom:{enabled:boolean;mode:PageZoomMode;pageGroups:number[][];transitionSec:number;padding:number}
   handPushEnding:{enabled:boolean}
   cameraPinned:boolean
+  // null giu nguyen pipeline tach vat the. Khi bat, Frame duoc reveal nhu mot raster duy nhat.
+  rasterWipe:{enabled:boolean;direction:RasterWipeDirection}|null
+  rasterWipeDurationSec:number
 }
 
 export const DEFAULT_SETTINGS:FrameSettings={
@@ -30,4 +34,6 @@ export const DEFAULT_SETTINGS:FrameSettings={
   pageZoom:{enabled:false,mode:'auto-rows',pageGroups:[],transitionSec:1,padding:.08},
   handPushEnding:{enabled:false},
   cameraPinned:false,
+  rasterWipe:null,
+  rasterWipeDurationSec:8,
 }

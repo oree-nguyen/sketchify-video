@@ -13,7 +13,7 @@ import { ProjectPlayer } from './render/ProjectPlayer'
 import { applyBlockOverridesToAnalysis, createEmptyProject, createFrame, createFrameFromSource, frameDrawDurationSec, mergeFrameObjects, objectDropInsertionIndex, reconcileFrameObjects, replaceFrameObjectWithRescan, setFrameCamera, setFrameCameraPinned, setFrameHold, setFramePageZoom, setFramePauseSettings, setFrameTransition, setObjectDuration, setObjectEffect, setObjectOrder, setObjectPush, setObjectZoomFollow, syncFrameDuration, translateLocalAnalysis, ungroupFrameObject, type AudioClip, type BlockOverrides, type Frame, type ObjectSettings, type Project, type SubtitleSettings } from './state/projectStore'
 import type { FrameSettings } from './state/settingsDefaults'
 import { buildProjectTimeline } from './timeline/projectTimeline'
-import { analyzeImage, type Analysis } from './wasm/wasmClient'
+import { analyzeImage, type Analysis, type AnalysisResult } from './wasm/wasmClient'
 import { synthesizeSpeech } from './tts/ttsClient'
 import { estimateWordTimestamps } from './tts/wordTimestamps'
 import type { TtsProgress } from './tts/types'
@@ -126,13 +126,17 @@ export default function App() {
       if (!context) throw new Error('Không tạo được Canvas2D')
       context.drawImage(image, 0, 0, canvas.width, canvas.height)
       const rgba = new Uint8Array(context.getImageData(0, 0, canvas.width, canvas.height).data)
-      const wasmResult = await analyzeImage(rgba, canvas.width, canvas.height, { ...settings, mergeRadius: 0 } as unknown as Record<string, unknown>)
-      const result = applyBlockOverridesToAnalysis(wasmResult, blockOverrides)
+      // Raster wipe owns the entire image as one raster surface. Do not start
+      // the imaging Worker/WASM or manufacture object/DrawUnit placeholders.
+      const wasmResult = settings.rasterWipe?.enabled
+        ? makeRasterAnalysis(rgba, canvas.width, canvas.height)
+        : await analyzeImage(rgba, canvas.width, canvas.height, { ...settings, mergeRadius: 0 } as unknown as Record<string, unknown>)
+      const result = settings.rasterWipe?.enabled ? wasmResult : applyBlockOverridesToAnalysis(wasmResult, blockOverrides)
       setAnalyses((current) => ({ ...current, [frameId]: result }))
       setProject((current) => ({
         ...current,
         frames: current.frames.map((frame) => frame.id === frameId
-          ? syncFrameDuration({ ...frame, objects: reconcileFrameObjects(frame.id, result.blocks, frame.objects), analysis: result, dirty: false })
+          ? syncFrameDuration({ ...frame, objects: settings.rasterWipe?.enabled ? frame.objects : reconcileFrameObjects(frame.id, result.blocks, frame.objects), analysis: result, dirty: false })
           : frame),
       }))
       setAnalysisStatus('idle')
@@ -208,7 +212,7 @@ export default function App() {
       next = setFrameCameraPinned(next, frameId, patch.cameraPinned)
     }
     const analysisPatch: Partial<FrameSettings> = {}
-    for (const key of ['segmentationMode', 'bgVarianceThreshold', 'bgEntropyThreshold', 'saliencyPercentile', 'localRescanPaddingPct'] as const) {
+    for (const key of ['segmentationMode', 'bgVarianceThreshold', 'bgEntropyThreshold', 'saliencyPercentile', 'localRescanPaddingPct', 'rasterWipe', 'rasterWipeDurationSec'] as const) {
       if (patch[key] !== undefined) Object.assign(analysisPatch, { [key]: patch[key] })
     }
     if (Object.keys(analysisPatch).length) next = { ...next, frames: next.frames.map((frame) => frame.id === frameId ? { ...frame, settings: { ...frame.settings, ...analysisPatch, mergeRadius: 0 }, dirty: true } : frame) }
@@ -572,7 +576,7 @@ export default function App() {
         if (!result) { setIsPlaying(false); return }
         readyAnalyses[frame.id] = result
         playbackProject = { ...playbackProject, frames: playbackProject.frames.map((candidate) => candidate.id === frame.id
-          ? syncFrameDuration({ ...candidate, objects: reconcileFrameObjects(candidate.id, result.blocks, candidate.objects), analysis: result, dirty: false })
+          ? syncFrameDuration({ ...candidate, objects: candidate.settings.rasterWipe?.enabled ? candidate.objects : reconcileFrameObjects(candidate.id, result.blocks, candidate.objects), analysis: result, dirty: false })
           : candidate) }
       }
     }
@@ -640,13 +644,13 @@ export default function App() {
     <section className="workspace">
           <FramePanel frames={project.frames} activeId={active?.id} select={selectFrame} upload={() => fileRef.current?.click()} create={() => openAiDialog()} regenerate={(frame) => void regenerateFrame(frame)} remove={(frame) => removeFrameById(frame.id)} drop={handleDrop} connectPollinations={connectPollinations} onPointerMove={handleSpotlight} />
       <section className="stage spotlight-surface" onPointerMove={handleSpotlight}>
-        <div className="stage-topline"><span>{active ? `KHUNG ${project.frames.findIndex((frame) => frame.id === active.id) + 1}` : 'SẴN SÀNG'}</span><span className="stage-diagnostics">{analysis && !showRender && <button className={`mask-toggle ${showInkMask ? 'active' : ''}`} type="button" aria-pressed={showInkMask} onClick={() => setShowInkMask((value) => !value)}>Ink mask</button>}{active && analysis && <select className="algorithm-mode" aria-label="Chế độ tách vật thể" value={active.settings.segmentationMode} onChange={(event) => updateFrameSettings({ segmentationMode: event.target.value as FrameSettings['segmentationMode'] })}><option value="auto">Tự động</option><option value="standard">Thuật toán chuẩn</option><option value="saliency">Thuật toán saliency</option></select>}<span>{analysisStatus === 'working' ? 'Đang phân tích bằng WASM…' : analysis ? <>{analysis.blocks.length} vật thể đã tách <small className="algorithm-status">· {analysis.stats.segmentationMode === 'saliency' ? 'Nền phức tạp · thuật toán saliency' : 'Nền đơn giản · thuật toán chuẩn'}</small></> : analysisStatus === 'error' ? 'Không thể phân tích ảnh' : 'Thêm ảnh để bắt đầu'}</span></span></div>
+        <div className="stage-topline"><span>{active ? `KHUNG ${project.frames.findIndex((frame) => frame.id === active.id) + 1}` : 'SẴN SÀNG'}</span><span className="stage-diagnostics">{analysis && !showRender && !active?.settings.rasterWipe?.enabled && <button className={`mask-toggle ${showInkMask ? 'active' : ''}`} type="button" aria-pressed={showInkMask} onClick={() => setShowInkMask((value) => !value)}>Ink mask</button>}{active && analysis && !active.settings.rasterWipe?.enabled && <select className="algorithm-mode" aria-label="Chế độ tách vật thể" value={active.settings.segmentationMode} onChange={(event) => updateFrameSettings({ segmentationMode: event.target.value as FrameSettings['segmentationMode'] })}><option value="auto">Tự động</option><option value="standard">Thuật toán chuẩn</option><option value="saliency">Thuật toán saliency</option></select>}<span>{analysisStatus === 'working' ? (active?.settings.rasterWipe?.enabled ? 'Đang chuẩn bị ảnh raster…' : 'Đang phân tích bằng WASM…') : analysis ? (active?.settings.rasterWipe?.enabled ? <>Vẽ nguyên khung hình <small className="algorithm-status">· không tách vật thể</small></> : <>{analysis.blocks.length} vật thể đã tách <small className="algorithm-status">· {analysis.stats.segmentationMode === 'saliency' ? 'Nền phức tạp · thuật toán saliency' : 'Nền đơn giản · thuật toán chuẩn'}</small></>) : analysisStatus === 'error' ? 'Không thể phân tích ảnh' : 'Thêm ảnh để bắt đầu'}</span></span></div>
         <div className={`preview ${showRender ? 'has-render' : ''} ${isPlaying ? 'is-playing' : ''}`}>
           {active && <div className="analyzed-image">
             <canvas ref={canvasRef} className="render-canvas" aria-label="Canvas xem thử" />
             {!showRender && <img className="source-image" src={active.sourceUrl} alt="Khung hiện tại" />}
-            {analysis && showInkMask && <InkMaskOverlay analysis={analysis} />}
-            {analysis && !isPlaying && <div className="block-overlay">{analysis.blocks.map((block) => {
+            {analysis && showInkMask && !active.settings.rasterWipe?.enabled && <InkMaskOverlay analysis={analysis} />}
+            {analysis && !isPlaying && !active.settings.rasterWipe?.enabled && <div className="block-overlay">{analysis.blocks.map((block) => {
               const object = active.objects.find((item) => item.blockId === block.id)
               return <button className={`block ${block.kind} ${object && selectedObjectIds.includes(object.objectId) ? 'selected' : ''}`} key={block.id} onClick={() => {
                 if (object) { selectOnlyObject(object.objectId); setEditScope('object'); setPanel('edit') }
@@ -663,6 +667,7 @@ export default function App() {
           {!active && <div className="empty-preview"><strong>Biến ảnh thành câu chuyện được vẽ</strong><p>Tải ảnh của bạn hoặc để AI tạo trọn storyboard tiếng Việt.</p><div className="empty-actions"><button className="export" onClick={() => fileRef.current?.click()}>Tải ảnh lên</button><button className="quiet" onClick={() => openAiDialog()}>Tạo video từ chủ đề…</button></div></div>}
         </div>
         <div className="transport"><div className="transport-left"><button className={`cc-toggle ${project.subtitle.enabled ? 'active' : ''}`} aria-label="Bật tắt phụ đề" aria-pressed={project.subtitle.enabled} onClick={() => updateSubtitle({ enabled: !project.subtitle.enabled })}>CC</button><button className={`mic-toggle ${audioOpen ? 'active' : ''}`} aria-label="Mở bảng tạo audio" aria-pressed={audioOpen} onClick={() => setAudioOpen((value) => !value)}>♩</button></div><div className="transport-center"><button disabled={isPlaying} onClick={() => setProgress(Math.max(0, progress - 10))}>−10</button><button className="play" disabled={!active} onClick={() => void play(false)}>{isPlaying ? 'Ⅱ' : '▶'}</button><button disabled={isPlaying} onClick={() => setProgress(Math.min(total, progress + 10))}>+10</button></div><span className="duration">{formatTime(progress)} / {formatTime(total)}</span></div>
+        {active && <div className="raster-wipe-control"><details className="raster-wipe-menu"><summary aria-label="Vẽ nguyên khung hình" title="Vẽ nguyên khung hình">▤ <span>Vẽ nguyên khung</span></summary><div className="raster-wipe-options">{([{ value: 'ttb', label: 'Trên xuống dưới' }, { value: 'ltr', label: 'Trái sang phải' }, { value: 'rtl', label: 'Phải sang trái' }, { value: 'btt', label: 'Dưới lên trên' }, { value: 'off', label: 'Tắt · vẽ theo vật thể' }] as const).map((option) => <button key={option.value} type="button" aria-pressed={option.value === 'off' ? !active.settings.rasterWipe?.enabled : active.settings.rasterWipe?.direction === option.value} onClick={(event) => { updateFrameSettings({ rasterWipe: option.value === 'off' ? null : { enabled: true, direction: option.value } }); event.currentTarget.closest('details')?.removeAttribute('open') }}>{option.label}</button>)}</div></details></div>}
         <input aria-label="Playhead" className="scrubber range-input" type="range" min="0" max={Math.max(total, 1)} step=".1" value={Math.min(progress, total)} style={{ '--range-progress': `${rangeProgress}%` } as CSSProperties} onChange={(event) => setProgress(Number(event.target.value))} />
         {active && audioOpen && <NarrationBar frame={active} busy={ttsBusy} progress={ttsProgress} onClose={() => setAudioOpen(false)} create={(text, voiceId, speed) => void createNarration(text, voiceId, speed)} />}
       </section>
@@ -683,6 +688,19 @@ export default function App() {
       disconnect={() => { disconnectPollinations(); setAiConnected(false); setAiProgress({ phase: 'script', message: 'Đã ngắt kết nối Pollinations.' }) }}
       generateImage={generateAiImage} generateStory={generateStory} retryFailure={retryAiFailure} />
   </main>
+}
+
+function makeRasterAnalysis(rgba: Uint8Array, w: number, h: number): AnalysisResult {
+  // This is intentionally not an analysis result from WASM: raster mode has no
+  // semantic blocks and no DrawUnits. Player only needs source RGBA and a
+  // stable background to initialize its canvas.
+  const samples = [0, w - 1, (h - 1) * w, w * h - 1]
+  const bg = samples.reduce<[number, number, number]>((sum, pixel) => [sum[0] + rgba[pixel * 4], sum[1] + rgba[pixel * 4 + 1], sum[2] + rgba[pixel * 4 + 2]], [0, 0, 0]).map((value) => Math.round(value / samples.length)) as [number, number, number]
+  return {
+    img: { rgba, gray: new Uint8Array(w * h), ink: new Uint8Array(w * h), saliency: new Uint8Array(w * h), w, h, bg },
+    blocks: [], units: [],
+    stats: { blocks: 0, units: 0, mergeRadiusConfigured: 0, mergeRadiusApplied: 0, workingWidthActual: w, openingApplied: false, segmentationMode: 'standard', backgroundVariance: 0, backgroundEntropy: 0, saliencyThreshold: 0 },
+  }
 }
 
 function formatTime(seconds: number) { return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(Math.floor(seconds % 60)).padStart(2, '0')}` }

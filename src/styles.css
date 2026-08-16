@@ -185,6 +185,14 @@ button:disabled { opacity: .45; }
 .range-input::-moz-range-progress { height: 8px; border-radius: 999px; background: var(--accent); box-shadow: 0 0 10px #84cc1680; }
 .range-input::-moz-range-thumb { width: 15px; height: 15px; border: 2px solid #d9f99d; border-radius: 50%; background: var(--accent); box-shadow: 0 0 13px #84cc1690; }
 .scrubber { flex: 0 0 auto; }
+.raster-wipe-control { position: relative; height: 0; z-index: 4; }
+.raster-wipe-menu { position: absolute; left: 92px; bottom: 6px; }
+.raster-wipe-menu > summary { list-style: none; min-width: 38px; height: 34px; display: flex; align-items: center; gap: 5px; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: 8px; background: #101820; color: #b9c7d1; cursor: pointer; font: 11px 'Oswald Sketchify', sans-serif; }
+.raster-wipe-menu > summary::-webkit-details-marker { display: none; }
+.raster-wipe-menu[open] > summary, .raster-wipe-menu > summary:hover { border-color: var(--accent); color: var(--accent-strong); box-shadow: 0 0 13px #84cc1640; }
+.raster-wipe-options { position: absolute; left: 0; bottom: 40px; width: 190px; display: grid; gap: 3px; padding: 6px; border: 1px solid #405426; border-radius: 9px; background: #0d141b; box-shadow: 0 16px 35px #000a; }
+.raster-wipe-options button { padding: 7px 9px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: #c9d5de; font: 11px 'Oswald Sketchify', sans-serif; text-align: left; }
+.raster-wipe-options button:hover, .raster-wipe-options button[aria-pressed="true"] { border-color: var(--accent); background: #1b2c0e; color: var(--accent-strong); box-shadow: 0 0 10px #84cc1633; }
 
 .control-label { display: block; color: #9eabb7; font-size: 10px; margin: 10px 0 6px; }
 .select-shell { border: 1px solid var(--line-strong); border-radius: 9px; background: var(--panel-raised); overflow: hidden; }

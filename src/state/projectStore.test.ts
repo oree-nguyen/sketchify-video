@@ -44,6 +44,15 @@ describe('FrameObject contract', () => {
     expect(boundaries).toEqual([[0, 1], [1, 3], [3, 6], [6, 10], [10, 15]])
   })
 
+  it('raster wipe dùng thời lượng quét cấp Frame, không phụ thuộc danh sách vật thể', () => {
+    const frame = makeFrame(101, [block(1, 0), block(2, 20)])
+    frame.settings.rasterWipe = { enabled: true, direction: 'ttb' }
+    frame.settings.rasterWipeDurationSec = 6.5
+    frame.settings.holdDurationSec = 1.5
+    expect(frameDrawDurationSec(frame)).toBe(6.5)
+    expect(frameDurationSec(frame)).toBe(8)
+  })
+
   it('đổi Object #2 không sửa Object khác và không đặt dirty/reanalyze', () => {
     const before = makeFrame(2, [block(0, 0), block(1, 20), block(2, 40)])
     const changed = updateObjectSettings(before, before.objects[1].objectId, { drawDurationSec: 7, zoomFollow: true })

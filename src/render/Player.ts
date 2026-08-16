@@ -24,6 +24,7 @@ export class Player {
     const pushHandImages=new Map<string,HTMLImageElement>()
     for(const settings of Object.values(this.options.objectSettingsByBlockId??{})){if(!settings.pushEntry.enabled)continue;const edge=settings.pushEntry.edge==='auto'?'left':settings.pushEntry.edge,asset=resolvePushHand(settings.pushEntry.handStyle,edge);if(asset.src&&!pushHandImages.has(asset.id))pushHandImages.set(asset.id,await loadImage(asset.src))}
     const {img,units}=this.options.analysis,w=img.w,h=img.h
+    if (this.options.settings?.rasterWipe?.enabled) return this.playRasterWipe(record, onProgress, handImage)
     const camera=this.options.settings?buildCameraTimeline(this.options.settings,this.options.analysis.blocks,units,w,h,this.options.zoomBlockIds,this.options.drawDurationSec):null
     const blockTiles=new Map<number,HTMLCanvasElement>()
     // Keep the captureStream track alive when ProjectPlayer already prepared
@@ -103,6 +104,97 @@ export class Player {
       };requestAnimationFrame(frame)
     })
   }
+
+  /** Raster wipe is deliberately isolated from DrawUnit rendering: no block, path or tile is consulted. */
+  private async playRasterWipe(record: boolean, onProgress: ((elapsedSec:number)=>void)|undefined, handImage: HTMLImageElement): Promise<PlayResult> {
+    const { img } = this.options.analysis
+    const { w, h } = img
+    const wipe = this.options.settings!.rasterWipe!
+    if (this.displayCanvas.width !== w) this.displayCanvas.width = w
+    if (this.displayCanvas.height !== h) this.displayCanvas.height = h
+    const display = this.displayCanvas.getContext('2d', { willReadFrequently: true })!
+    const content = document.createElement('canvas'); content.width = w; content.height = h
+    const ctx = content.getContext('2d', { willReadFrequently: true })!
+    const source = rasterSourceCanvas(img.rgba, img.bg, w, h)
+    ctx.fillStyle = `rgb(${img.bg.join(',')})`; ctx.fillRect(0, 0, w, h)
+    display.fillStyle = `rgb(${img.bg.join(',')})`; display.fillRect(0, 0, w, h)
+    this.options.onCanvasReady?.()
+
+    const drawMs = Math.max(100, this.options.drawDurationSec * 1000)
+    const totalMs = drawMs + this.options.holdDurationSec * 1000
+    const camera = rasterCameraKeys(this.options.settings!, w, h)
+    const recorder = record ? makeRecorder(this.displayCanvas, this.options.fps) : undefined
+    const chunks: BlobPart[] = []
+    if (recorder) { recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data) }; recorder.start(100) }
+    const started = performance.now()
+    let revealed = 0, lastHand: { x:number;y:number } | null = null, angle = 0
+    return await new Promise<PlayResult>((resolve) => {
+      const frame = (now: number) => {
+        const elapsed = now - started
+        const progress = Math.max(0, Math.min(1, elapsed / drawMs))
+        onProgress?.(elapsed / 1000)
+        const next = Math.round((wipe.direction === 'ttb' || wipe.direction === 'btt' ? h : w) * progress)
+        if (next > revealed) drawRasterDelta(ctx, source, wipe.direction, revealed, next, w, h)
+        revealed = Math.max(revealed, next)
+        const crop = cameraAt(camera, progress)
+        display.clearRect(0, 0, w, h)
+        display.drawImage(content, crop.x, crop.y, crop.w, crop.h, 0, 0, w, h)
+        if (progress < 1) {
+          const raw = rasterHandPosition(wipe.direction, progress, w, h)
+          const pos = { x: (raw.x - crop.x) * w / crop.w, y: (raw.y - crop.y) * h / crop.h }
+          if (lastHand) { const target = Math.atan2(pos.y - lastHand.y, pos.x - lastHand.x); angle += (target - angle) * .25 }
+          drawHand(display, handImage, this.options.hand.anchorPct, pos.x, pos.y, angle, w)
+          lastHand = pos
+        } else if (this.options.settings?.handPushEnding.enabled && lastHand && this.options.holdDurationSec >= 1.2 && elapsed < drawMs + Math.min(.8, this.options.holdDurationSec) * 1000) {
+          drawHand(display, handImage, this.options.hand.anchorPct, lastHand.x, lastHand.y, angle, w)
+        }
+        if (this.options.subtitle) drawSubtitleOverlay(display, this.options.subtitle.settings, this.options.subtitle.track, elapsed / 1000)
+        if (!this.stopped && elapsed < totalMs) { requestAnimationFrame(frame); return }
+        if (!recorder) { resolve({ elapsedMs: elapsed }); return }
+        recorder.onstop = () => resolve({ elapsedMs: elapsed, blob: new Blob(chunks, { type: recorder.mimeType || 'video/webm' }) })
+        recorder.stop()
+      }
+      requestAnimationFrame(frame)
+    })
+  }
+}
+
+function rasterSourceCanvas(rgba: Uint8Array, bg: [number, number, number], w: number, h: number): HTMLCanvasElement {
+  const source = document.createElement('canvas'); source.width = w; source.height = h
+  const context = source.getContext('2d', { willReadFrequently: true })!, data = context.createImageData(w, h)
+  for (let pixel = 0; pixel < w * h; pixel++) {
+    const from = pixel * 4, alpha = rgba[from + 3] / 255
+    data.data[from] = Math.round(rgba[from] * alpha + bg[0] * (1 - alpha))
+    data.data[from + 1] = Math.round(rgba[from + 1] * alpha + bg[1] * (1 - alpha))
+    data.data[from + 2] = Math.round(rgba[from + 2] * alpha + bg[2] * (1 - alpha))
+    data.data[from + 3] = 255
+  }
+  context.putImageData(data, 0, 0)
+  return source
+}
+
+function drawRasterDelta(ctx: CanvasRenderingContext2D, source: HTMLCanvasElement, direction: NonNullable<FrameSettings['rasterWipe']>['direction'], from: number, to: number, w: number, h: number): void {
+  const amount = Math.max(0, to - from); if (!amount) return
+  if (direction === 'ttb') ctx.drawImage(source, 0, from, w, amount, 0, from, w, amount)
+  else if (direction === 'btt') ctx.drawImage(source, 0, h - to, w, amount, 0, h - to, w, amount)
+  else if (direction === 'ltr') ctx.drawImage(source, from, 0, amount, h, from, 0, amount, h)
+  else ctx.drawImage(source, w - to, 0, amount, h, w - to, 0, amount, h)
+}
+
+function rasterHandPosition(direction: NonNullable<FrameSettings['rasterWipe']>['direction'], progress: number, w: number, h: number): { x:number;y:number } {
+  const sweep = .08 + .84 * progress
+  if (direction === 'ttb') return { x: w * sweep, y: h * progress }
+  if (direction === 'btt') return { x: w * (1 - sweep), y: h * (1 - progress) }
+  if (direction === 'ltr') return { x: w * progress, y: h * sweep }
+  return { x: w * (1 - progress), y: h * (1 - sweep) }
+}
+
+function rasterCameraKeys(settings: FrameSettings, w: number, h: number) {
+  const all = { x: 0, y: 0, w, h }
+  if (settings.cameraPinned || settings.camera.mode === 'off' || settings.camera.mode === 'A-auto-follow' || settings.camera.mode === 'B-manual-keyframe' || settings.camera.mode === 'D-hybrid') return [{ t: 0, crop: all, easing: 'linear' as const, role: 'full' as const }, { t: 1, crop: all, easing: 'linear' as const, role: 'full' as const }]
+  const scale = Math.max(1, settings.camera.zoomLevel)
+  const crop = { w: w / scale, h: h / scale, x: (w - w / scale) / 2, y: (h - h / scale) / 2 }
+  return [{ t: 0, crop, easing: 'linear' as const, role: 'focus' as const }, { t: 1 - settings.camera.zoomOutPortion, crop: all, easing: 'easeInOutCubic' as const, role: 'zoom-out' as const }, { t: 1, crop: all, easing: 'linear' as const, role: 'full' as const }]
 }
 
 const loadImage=(src:string)=>new Promise<HTMLImageElement>((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=reject;img.src=src})
