@@ -20,6 +20,8 @@ export interface ProposalNode {
 export interface SegmentationLane {
   id: string
   kind: 'text' | 'known-object' | 'unknown-object' | 'classical'
+  /** Filled by ONNX-backed lanes after a successful session creation. */
+  executionProvider?: 'webgpu' | 'wasm'
   available(): boolean | Promise<boolean>
   propose(input: SegmentationInput): Promise<ProposalNode[]>
 }

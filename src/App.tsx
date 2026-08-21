@@ -19,6 +19,7 @@ import { estimateWordTimestamps } from './tts/wordTimestamps'
 import type { TtsProgress } from './tts/types'
 import { createSession, deleteSession, listSessions, loadSession, makeSessionRecord, resolveInitialSession, restoreProject, saveSession, setActiveSessionId, type SessionSummary } from './state/sessionStore'
 import { runSemanticLanes } from './segmentation/workerClient'
+import { materializeSemanticProposals } from './segmentation/semanticMaterialize'
 
 export default function App() {
   const [project, setProject] = useState<Project>(() => createEmptyProject())
@@ -141,7 +142,10 @@ export default function App() {
         const revision = ++analysisRevisionRef.current
         try {
           const semantic = await runSemanticLanes(result, frameId, revision)
-          result = { ...result, diagnostics: result.diagnostics ? { ...result.diagnostics, lanesAttempted: semantic.lanesAttempted, lanesUsed: semantic.lanesUsed, fallbackLanes: semantic.fallbackLanes, warnings: [...result.diagnostics.warnings, ...semantic.warnings], timingsMs: { ...result.diagnostics.timingsMs, ...Object.fromEntries(Object.entries(semantic.timingsMs).map(([lane, ms]) => [`semantic:${lane}`, ms])) }, executionProviders: { ...result.diagnostics.executionProviders, ...semantic.executionProviders }, proposalCountsBySource: { ...result.diagnostics.proposalCountsBySource, 'semantic-worker': semantic.proposals.length } } : result.diagnostics }
+          const semanticMaterialized = semantic.lanesUsed.some((lane) => lane === 'known-object-detector' || lane === 'ocr-text-lines' || lane === 'unknown-object-sam')
+            ? materializeSemanticProposals(result, semantic.proposals)
+            : result
+          result = { ...semanticMaterialized, diagnostics: semanticMaterialized.diagnostics ? { ...semanticMaterialized.diagnostics, lanesAttempted: semantic.lanesAttempted, lanesUsed: semantic.lanesUsed, fallbackLanes: semantic.fallbackLanes, warnings: [...semanticMaterialized.diagnostics.warnings, ...semantic.warnings], timingsMs: { ...semanticMaterialized.diagnostics.timingsMs, ...Object.fromEntries(Object.entries(semantic.timingsMs).map(([lane, ms]) => [`semantic:${lane}`, ms])) }, executionProviders: { ...semanticMaterialized.diagnostics.executionProviders, ...semantic.executionProviders }, proposalCountsBySource: { ...semanticMaterialized.diagnostics.proposalCountsBySource, 'semantic-worker': semantic.proposals.length } } : semanticMaterialized.diagnostics }
         } catch (error) {
           console.warn('[Sketchify] semantic lane worker unavailable; preserving explicit WASM fallback', error)
         }

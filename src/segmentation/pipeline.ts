@@ -15,6 +15,7 @@ export async function runSegmentationLanes(input: SegmentationInput, lanes: read
       const started = performance.now()
       const output = await lane.propose(input)
       timingsMs[lane.id] = performance.now() - started
+      if (lane.executionProvider) executionProviders[lane.id] = lane.executionProvider
       proposals.push(...output); lanesUsed.push(lane.id)
     } catch (error) {
       fallbackLanes.push(lane.id); warnings.push(`${lane.id}: ${error instanceof Error ? error.message : String(error)}`)

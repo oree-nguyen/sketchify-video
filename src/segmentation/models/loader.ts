@@ -37,12 +37,20 @@ export async function loadModel(entry: SegmentationModelManifest, onProgress?: (
       for (const part of parts) { body.set(part, offset); offset += part.byteLength }
       response = new Response(body, { headers: response.headers, status: response.status, statusText: response.statusText })
     }
-    if (cache) await cache.put(url, response.clone())
   } else onProgress?.({ loaded: entry.bytes, total: entry.bytes, phase: 'cache' })
   const bytes = new Uint8Array(await response.arrayBuffer())
   onProgress?.({ loaded: bytes.byteLength, total: bytes.byteLength, phase: 'hash' })
   const actual = await sha256Hex(bytes)
-  if (actual.toLowerCase() !== entry.sha256.toLowerCase()) throw new ModelCompatibilityError(`Model ${entry.id} SHA-256 mismatch`, entry.id)
-  if (entry.bytes > 0 && bytes.byteLength !== entry.bytes) throw new ModelCompatibilityError(`Model ${entry.id} byte-size mismatch`, entry.id)
+  if (actual.toLowerCase() !== entry.sha256.toLowerCase()) {
+    if (cache) await cache.delete(url)
+    throw new ModelCompatibilityError(`Model ${entry.id} SHA-256 mismatch`, entry.id)
+  }
+  if (entry.bytes > 0 && bytes.byteLength !== entry.bytes) {
+    if (cache) await cache.delete(url)
+    throw new ModelCompatibilityError(`Model ${entry.id} byte-size mismatch`, entry.id)
+  }
+  // Only persist a verified immutable artifact. A corrupt response must not
+  // poison the cache and make every subsequent inference fail identically.
+  if (cache && !cached) await cache.put(url, new Response(bytes, { headers: { 'content-type': 'application/octet-stream' } }))
   return bytes
 }
