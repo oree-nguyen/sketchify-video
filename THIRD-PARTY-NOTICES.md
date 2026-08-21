@@ -46,3 +46,22 @@ The voice model and configuration are distributed from `public/voices/` and fetc
 - Source: https://huggingface.co/pnnbao-ump/VieNeu-TTS-v3-Turbo
 
 Engine and checkpoint metadata is intentionally internal. End users select only friendly voice names in the application.
+
+## Complex segmentation runtime
+
+No detector, OCR, or MobileSAM weight is bundled in this repository. The
+browser registry is empty until a model has a verified relative URL, byte size,
+SHA-256, opset and redistribution license. This is deliberate: an unverified
+or root-absolute model URL would either violate the distribution contract or
+fail as an HTML 404 response.
+
+When enabling a model, record the exact artifact and license here:
+
+| Lane | Artifact | License | SHA-256 | Bytes | ONNX opset | Providers tested |
+|---|---|---|---|---:|---:|---|
+| OCR/text | not bundled | pending verified artifact | pending | pending | pending | pending |
+| known-object detector | not bundled | pending verified artifact | pending | pending | pending | pending |
+| MobileSAM refiner | not bundled | Apache-2.0 upstream; artifact pending | pending | pending | pending | pending |
+
+The classical Go/WASM cues (foreground, saliency, colour clustering, CCL,
+Sobel/Lab and watershed) are first-party project code under AGPL-3.0-only.

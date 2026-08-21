@@ -4,6 +4,8 @@ import type { Rect, WorkImage } from '../wasm/wasmClient'
 export interface SegmentationInput {
   image: WorkImage
   background: [number, number, number]
+  signal?: AbortSignal
+  analysisRevision?: number
 }
 
 export interface ProposalNode {
@@ -28,4 +30,6 @@ export interface SegmentationPipelineResult {
   lanesUsed: string[]
   fallbackLanes: string[]
   warnings: string[]
+  timingsMs: Record<string, number>
+  executionProviders: Record<string, 'webgpu' | 'wasm'>
 }

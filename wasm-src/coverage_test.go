@@ -47,3 +47,12 @@ func TestComplexOwnershipKeepsResidualCoverageSeparate(t *testing.T) {
 		}
 	}
 }
+
+func TestExclusiveObjectBBoxesComeFromOwnedPixels(t *testing.T) {
+	const w, h = 12, 8
+	rgba := solidRGBA(w, h, Color{245, 245, 245})
+	settings := DefaultSettings(); settings.MinBlockInk = 1
+	input := []Block{{BBox: Rect{X: 0, Y: 0, W: 12, H: 8}, Pixels: []int{2*w + 3, 2*w + 4, 3*w + 3}, InkArea: 3, CentroidX: 99, CentroidY: 99}}
+	out := ExclusiveObjectBlocks(input, rgba, w, h, settings)
+	if len(out) != 1 || out[0].BBox != (Rect{X: 3, Y: 2, W: 2, H: 2}) { t.Fatalf("bbox was not derived from mask: %#v", out) }
+}

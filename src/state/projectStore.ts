@@ -524,7 +524,13 @@ export function retimeAnalysisForFrame(analysis: Analysis, frame: Pick<Frame, 'o
       : frame.settings.microPauseMs
     return { ...unit, pauseAfterMs }
   })
-  return { ...analysis, blocks, units: pausedUnits, stats: { ...analysis.stats, units: pausedUnits.length, blocks: blocks.length } }
+  const unitsV2 = analysis.unitsV2?.map((unit, index) => ({
+    ...unit,
+    t0: pausedUnits[index]?.t0 ?? unit.t0,
+    t1: pausedUnits[index]?.t1 ?? unit.t1,
+    pauseAfterMs: pausedUnits[index]?.pauseAfterMs ?? unit.pauseAfterMs,
+  }))
+  return { ...analysis, blocks, units: pausedUnits, unitsV2, stats: { ...analysis.stats, units: pausedUnits.length, blocks: blocks.length } }
 }
 
 function bboxEdgeDistance(a: Block['bbox'], b: Block['bbox']): number {

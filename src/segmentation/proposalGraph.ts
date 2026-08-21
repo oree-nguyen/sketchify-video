@@ -7,6 +7,10 @@ export interface ProposalEdge {
   maskIou: number
   bboxOverlap: number
   boundaryGap: number
+  contact: boolean
+  baselineDelta: number
+  detectorConflict: boolean
+  evidence: string[]
   mergeScore: number
 }
 
@@ -25,7 +29,11 @@ export function buildProposalGraph(nodes: readonly ProposalNode[], width: number
     if (bboxOverlap === 0 && boundaryGap > Math.max(4, width * .04)) continue
     const overlap = maskIou(a.maskRle, b.maskRle)
     const mergeScore = overlap * .6 + (bboxOverlap > .05 ? .25 : 0) + (boundaryGap <= 2 ? .15 : 0)
-    edges.push({ from: a.id, to: b.id, maskIou: overlap, bboxOverlap, boundaryGap, mergeScore })
+    const baselineDelta = Math.abs((a.bbox.y + a.bbox.h) - (b.bbox.y + b.bbox.h))
+    const contact = boundaryGap === 0 && bboxOverlap === 0
+    const detectorConflict = a.evidence.some((item) => item.source === 'detector') && b.evidence.some((item) => item.source === 'detector') && overlap < .05
+    const evidence = [overlap > .05 ? 'mask-iou' : 'mask-disjoint', bboxOverlap > 0 ? 'bbox-overlap' : 'gap', contact ? 'boundary-contact' : 'separated', baselineDelta <= Math.max(a.bbox.h, b.bbox.h) ? 'baseline-aligned' : 'baseline-different']
+    edges.push({ from: a.id, to: b.id, maskIou: overlap, bboxOverlap, boundaryGap, contact, baselineDelta, detectorConflict, evidence, mergeScore })
   }
   return { nodes: [...nodes], edges }
 }

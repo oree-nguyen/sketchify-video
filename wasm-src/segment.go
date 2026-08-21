@@ -25,6 +25,7 @@ type AnalysisResult struct {
 	// object blocks. They are still rendered, but never become a fake object.
 	CoveragePixels []int
 	Architecture   string
+	AtomicRegionCount int
 }
 
 // Components dùng flood-fill stack 4-láng giềng, không đệ quy để tránh tràn stack.
@@ -90,6 +91,24 @@ func Analyze(rgba []byte, w, h int, s Settings) AnalysisResult {
 		saliencyThreshold = PercentileThreshold(saliency, s.SaliencyPercentile)
 		stage2 := CascadeStage2(fine, saliency, saliencyThreshold, s)
 		stage3 := CascadeStage3(stage2, saliency, w, h, s.SaliencyPercentile, s)
+		// Atomic regions are a boundary cue for later graph/model lanes. They are
+		// deliberately not promoted to editorial objects on their own.
+		_, markerComponents := Components(stage3, w, h)
+		gradient := LabGradientCue(rgba, w, h)
+		// Watershed is an atomic cue, not a final pixel owner. Run it on a
+		// deterministic half-resolution grid to keep the browser fallback within
+		// its budget while retaining the same Lab/Sobel boundary ordering.
+		atomicW, atomicH := (w+1)/2, (h+1)/2
+		atomicGradient := make([]uint8, atomicW*atomicH); atomicMarkers := make([]int, atomicW*atomicH)
+		for i := range atomicMarkers { atomicMarkers[i] = -1 }
+		for y := 0; y < atomicH; y++ { for x := 0; x < atomicW; x++ { atomicGradient[y*atomicW+x] = gradient[minInt(h-1, y*2)*w+minInt(w-1, x*2)] } }
+		for markerID, component := range markerComponents {
+			if len(component) == 0 { continue }
+			pixel := component[0]; x, y := (pixel%w)/2, (pixel/w)/2; atomicMarkers[y*atomicW+x] = markerID
+		}
+		atomicLabels := MarkerControlledWatershed(atomicGradient, atomicMarkers, atomicW, atomicH)
+		atomicCount := 0
+		for _, label := range atomicLabels { if label >= atomicCount { atomicCount = label + 1 } }
 		// Complex mode now stops at editorial candidates. The old CascadeStage4
 		// and Stage5 partition every residual pixel into arbitrary Voronoi-like
 		// regions; that made background texture look like dozens of objects.
@@ -103,7 +122,7 @@ func Analyze(rgba []byte, w, h int, s Settings) AnalysisResult {
 		for i := range out {
 			out[i].ID = i
 		}
-		return AnalysisResult{Background: bg, Blocks: out, EffectiveMergeRadius: 0, OpeningApplied: false, Ink: fullMask(w, h), Saliency: saliency, SegmentationMode: mode, BackgroundVariance: variance, BackgroundEntropy: entropy, SaliencyThreshold: saliencyThreshold, CoveragePixels: coveragePixels, Architecture: "legacy-candidates+coverage"}
+		return AnalysisResult{Background: bg, Blocks: out, EffectiveMergeRadius: 0, OpeningApplied: false, Ink: fullMask(w, h), Saliency: saliency, SegmentationMode: mode, BackgroundVariance: variance, BackgroundEntropy: entropy, SaliencyThreshold: saliencyThreshold, CoveragePixels: coveragePixels, Architecture: "legacy-candidates+coverage", AtomicRegionCount: atomicCount}
 	}
 	fine = DilateSquare(ErodeSquare(fine, w, h, 1), w, h, 1)
 	// rgba đã được resize về ảnh làm việc trước khi vào WASM. Scale bán kính theo

@@ -18,6 +18,7 @@ import { synthesizeSpeech } from './tts/ttsClient'
 import { estimateWordTimestamps } from './tts/wordTimestamps'
 import type { TtsProgress } from './tts/types'
 import { createSession, deleteSession, listSessions, loadSession, makeSessionRecord, resolveInitialSession, restoreProject, saveSession, setActiveSessionId, type SessionSummary } from './state/sessionStore'
+import { runSemanticLanes } from './segmentation/workerClient'
 
 export default function App() {
   const [project, setProject] = useState<Project>(() => createEmptyProject())
@@ -50,6 +51,7 @@ export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const playerRef = useRef<{ stop(): void } | null>(null)
   const sessionSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const analysisRevisionRef = useRef(0)
 
   const queueSessionSave = (snapshot: Project, id: string, name: string, createdAt: string) => {
     const task = sessionSaveQueueRef.current.catch(() => undefined).then(async () => {
@@ -61,6 +63,9 @@ export default function App() {
 
   const active = project.frames.find((frame) => frame.id === project.activeFrameId) ?? null
   const analysis = active ? analyses[active.id] ?? null : null
+  const overlayItems = analysis?.objects?.length
+    ? analysis.objects.map((object) => ({ id: object.id, bbox: object.bbox, kind: object.kind }))
+    : (analysis?.blocks ?? []).map((block) => ({ id: block.id, bbox: block.bbox, kind: block.kind }))
   const timeline = useMemo(() => buildProjectTimeline(project), [project.frames])
   const total = timeline.totalDurationSec
   const progress = project.playhead.globalTimeSec
@@ -131,7 +136,18 @@ export default function App() {
       const wasmResult = settings.rasterWipe?.enabled
         ? makeRasterAnalysis(rgba, canvas.width, canvas.height)
         : await analyzeImage(rgba, canvas.width, canvas.height, { ...settings, mergeRadius: 0 } as unknown as Record<string, unknown>)
-      const result = settings.rasterWipe?.enabled ? wasmResult : applyBlockOverridesToAnalysis(wasmResult, blockOverrides)
+      let result = settings.rasterWipe?.enabled ? wasmResult : applyBlockOverridesToAnalysis(wasmResult, blockOverrides)
+      if (!settings.rasterWipe?.enabled && result.stats.segmentationMode === 'saliency') {
+        const revision = ++analysisRevisionRef.current
+        try {
+          const semantic = await runSemanticLanes(result, frameId, revision)
+          result = { ...result, diagnostics: result.diagnostics ? { ...result.diagnostics, lanesAttempted: semantic.lanesAttempted, lanesUsed: semantic.lanesUsed, fallbackLanes: semantic.fallbackLanes, warnings: [...result.diagnostics.warnings, ...semantic.warnings], timingsMs: { ...result.diagnostics.timingsMs, ...Object.fromEntries(Object.entries(semantic.timingsMs).map(([lane, ms]) => [`semantic:${lane}`, ms])) }, executionProviders: { ...result.diagnostics.executionProviders, ...semantic.executionProviders }, proposalCountsBySource: { ...result.diagnostics.proposalCountsBySource, 'semantic-worker': semantic.proposals.length } } : result.diagnostics }
+        } catch (error) {
+          console.warn('[Sketchify] semantic lane worker unavailable; preserving explicit WASM fallback', error)
+        }
+      }
+      ;(window as Window & { __sketchifyLastAnalysis?: Analysis }).__sketchifyLastAnalysis = result
+      ;(window as Window & { __sketchifyAnalysisRevision?: number }).__sketchifyAnalysisRevision = ((window as Window & { __sketchifyAnalysisRevision?: number }).__sketchifyAnalysisRevision ?? 0) + 1
       setAnalyses((current) => ({ ...current, [frameId]: result }))
       setProject((current) => ({
         ...current,
@@ -644,13 +660,14 @@ export default function App() {
     <section className="workspace">
           <FramePanel frames={project.frames} activeId={active?.id} select={selectFrame} upload={() => fileRef.current?.click()} create={() => openAiDialog()} regenerate={(frame) => void regenerateFrame(frame)} remove={(frame) => removeFrameById(frame.id)} drop={handleDrop} connectPollinations={connectPollinations} onPointerMove={handleSpotlight} />
       <section className="stage spotlight-surface" onPointerMove={handleSpotlight}>
-        <div className="stage-topline"><span>{active ? `KHUNG ${project.frames.findIndex((frame) => frame.id === active.id) + 1}` : 'SẴN SÀNG'}</span><span className="stage-diagnostics">{analysis && !showRender && !active?.settings.rasterWipe?.enabled && <button className={`mask-toggle ${showInkMask ? 'active' : ''}`} type="button" aria-pressed={showInkMask} onClick={() => setShowInkMask((value) => !value)}>Ink mask</button>}{active && analysis && !active.settings.rasterWipe?.enabled && <select className="algorithm-mode" aria-label="Chế độ tách vật thể" value={active.settings.segmentationMode} onChange={(event) => updateFrameSettings({ segmentationMode: event.target.value as FrameSettings['segmentationMode'] })}><option value="auto">Tự động</option><option value="standard">Thuật toán chuẩn</option><option value="saliency">Thuật toán saliency</option></select>}<span>{analysisStatus === 'working' ? (active?.settings.rasterWipe?.enabled ? 'Đang chuẩn bị ảnh raster…' : 'Đang phân tích bằng WASM…') : analysis ? (active?.settings.rasterWipe?.enabled ? <>Vẽ nguyên khung hình <small className="algorithm-status">· không tách vật thể</small></> : <>{analysis.blocks.length} vật thể đã tách <small className="algorithm-status">· {analysis.stats.segmentationMode === 'saliency' ? 'Nền phức tạp · thuật toán saliency' : 'Nền đơn giản · thuật toán chuẩn'}</small></>) : analysisStatus === 'error' ? 'Không thể phân tích ảnh' : 'Thêm ảnh để bắt đầu'}</span></span></div>
+        <div className="stage-topline"><span>{active ? `KHUNG ${project.frames.findIndex((frame) => frame.id === active.id) + 1}` : 'SẴN SÀNG'}</span><span className="stage-diagnostics">{analysis && !showRender && !active?.settings.rasterWipe?.enabled && <button className={`mask-toggle ${showInkMask ? 'active' : ''}`} type="button" aria-pressed={showInkMask} onClick={() => setShowInkMask((value) => !value)}>Ink mask</button>}{active && analysis && !active.settings.rasterWipe?.enabled && <select className="algorithm-mode" aria-label="Chế độ tách vật thể" value={active.settings.segmentationMode} onChange={(event) => updateFrameSettings({ segmentationMode: event.target.value as FrameSettings['segmentationMode'] })}><option value="auto">Tự động</option><option value="standard">Thuật toán chuẩn</option><option value="saliency">Thuật toán saliency</option></select>}<span>{analysisStatus === 'working' ? (active?.settings.rasterWipe?.enabled ? 'Đang chuẩn bị ảnh raster…' : 'Đang phân tích bằng WASM…') : analysis ? (active?.settings.rasterWipe?.enabled ? <>Vẽ nguyên khung hình <small className="algorithm-status">· không tách vật thể</small></> : <>{(analysis.objects?.length ?? analysis.blocks.length)} vật thể đã tách <small className="algorithm-status">· {analysis.stats.segmentationMode === 'saliency' ? 'Nền phức tạp · thuật toán saliency' : 'Nền đơn giản · thuật toán chuẩn'}</small></>) : analysisStatus === 'error' ? 'Không thể phân tích ảnh' : 'Thêm ảnh để bắt đầu'}</span></span></div>
+        {analysis?.diagnostics?.fallbackLanes.length ? <p className="algorithm-warning">Semantic lanes unavailable: {analysis.diagnostics.fallbackLanes.join(', ')}. Classical result is provisional.</p> : null}
         <div className={`preview ${showRender ? 'has-render' : ''} ${isPlaying ? 'is-playing' : ''}`}>
           {active && <div className="analyzed-image">
             <canvas ref={canvasRef} className="render-canvas" aria-label="Canvas xem thử" />
             {!showRender && <img className="source-image" src={active.sourceUrl} alt="Khung hiện tại" />}
             {analysis && showInkMask && !active.settings.rasterWipe?.enabled && <InkMaskOverlay analysis={analysis} />}
-            {analysis && !isPlaying && !active.settings.rasterWipe?.enabled && <div className="block-overlay">{analysis.blocks.map((block) => {
+            {analysis && !active.settings.rasterWipe?.enabled && <div className="block-overlay">{overlayItems.map((block) => {
               const object = active.objects.find((item) => item.blockId === block.id)
               return <button className={`block ${block.kind} ${object && selectedObjectIds.includes(object.objectId) ? 'selected' : ''}`} key={block.id} onClick={() => {
                 if (object) { selectOnlyObject(object.objectId); setEditScope('object'); setPanel('edit') }

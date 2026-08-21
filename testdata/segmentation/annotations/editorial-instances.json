@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 2,
+  "coordinateSpace": "normalized",
+  "fixtures": {
+    "testthuattoanmoi (1).png": {
+      "width": 1672,
+      "height": 941,
+      "expectedCount": 16,
+      "objects": [
+        {"id":"questions","role":"compound","bbox":[0.03,0.01,0.20,0.17],"maskRle":null},
+        {"id":"dinosaur","role":"thing","bbox":[0.00,0.18,0.23,0.79],"maskRle":null},
+        {"id":"percent","role":"text-line","bbox":[0.27,0.16,0.28,0.23],"maskRle":null},
+        {"id":"tai-sao","role":"text-line","bbox":[0.27,0.01,0.20,0.12],"maskRle":null},
+        {"id":"black-may-bay","role":"compound","bbox":[0.52,0.02,0.29,0.13],"maskRle":null},
+        {"id":"red-banner","role":"compound","bbox":[0.52,0.14,0.35,0.19],"maskRle":null},
+        {"id":"white-aircraft","role":"thing","bbox":[0.22,0.37,0.43,0.45],"maskRle":null},
+        {"id":"blue-aircraft","role":"thing","bbox":[0.64,0.34,0.34,0.19],"maskRle":null},
+        {"id":"tower","role":"thing","bbox":[0.91,0.44,0.09,0.31],"maskRle":null},
+        {"id":"red-yellow-aircraft","role":"thing","bbox":[0.67,0.54,0.25,0.18],"maskRle":null},
+        {"id":"bamboo-aircraft","role":"thing","bbox":[0.67,0.75,0.33,0.22],"maskRle":null},
+        {"id":"icon-mat-hon","role":"compound","bbox":[0.08,0.78,0.16,0.18],"maskRle":null},
+        {"id":"icon-de-kiem-tra","role":"compound","bbox":[0.22,0.78,0.17,0.18],"maskRle":null},
+        {"id":"icon-nhe-hon","role":"compound","bbox":[0.36,0.78,0.17,0.18],"maskRle":null},
+        {"id":"icon-tiet-kiem","role":"compound","bbox":[0.50,0.78,0.17,0.18],"maskRle":null},
+        {"id":"icon-de-doi-moi","role":"compound","bbox":[0.64,0.78,0.18,0.18],"maskRle":null}
+      ]
+    }
+  }
+}

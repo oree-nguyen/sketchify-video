@@ -48,12 +48,15 @@ export function evaluateEditorialObjects(predicted: readonly ObjectInstance[], e
     const roleOkay = !limit.requireRole || !target.role || target.role === object.role
     return { box, mask, roleOkay }
   }))
-  const pairs = candidates.flatMap((row, predictedIndex) => row.map((score, expectedIndex) => ({ predictedIndex, expectedIndex, score: score.box, mask: score.mask, roleOkay: score.roleOkay }))).filter((pair) => pair.score >= limit.minBoxIou && (pair.mask === undefined || pair.mask >= limit.minMaskIou) && pair.roleOkay).sort((a, b) => b.score - a.score)
+  // Hungarian maximises the total IoU before thresholding. Greedy edge order
+  // is not sufficient when one prediction overlaps two nearby annotations.
+  const assignment = hungarianMax(candidates.map((row) => row.map((score) => score.box)))
   const usedPredicted = new Set<number>(), usedExpected = new Set<number>(), matched: ObjectMatch[] = []
-  for (const pair of pairs) {
-    if (usedPredicted.has(pair.predictedIndex) || usedExpected.has(pair.expectedIndex)) continue
-    usedPredicted.add(pair.predictedIndex); usedExpected.add(pair.expectedIndex)
-    matched.push({ predictedId: predicted[pair.predictedIndex].id, expectedId: expected[pair.expectedIndex].id, boxIou: pair.score, maskIou: pair.mask })
+  for (const [predictedIndex, expectedIndex] of assignment) {
+    const score = candidates[predictedIndex]?.[expectedIndex]
+    if (!score || score.box < limit.minBoxIou || (score.mask !== undefined && score.mask < limit.minMaskIou) || !score.roleOkay) continue
+    usedPredicted.add(predictedIndex); usedExpected.add(expectedIndex)
+    matched.push({ predictedId: predicted[predictedIndex].id, expectedId: expected[expectedIndex].id, boxIou: score.box, maskIou: score.mask })
   }
   const missedExpected = expected.filter((_, index) => !usedExpected.has(index)).map((target) => target.id)
   const extraPredicted = predicted.filter((_, index) => !usedPredicted.has(index)).map((object) => object.id)
@@ -61,6 +64,37 @@ export function evaluateEditorialObjects(predicted: readonly ObjectInstance[], e
   const splitOrMerged = predicted.length !== expected.length
   const passed = !splitOrMerged && missedExpected.length === 0 && extraPredicted.length === 0 && reconstruction === 'exact'
   return { passed, expectedCount: expected.length, predictedCount: predicted.length, matched, missedExpected, extraPredicted, splitOrMerged, reconstruction, reason: passed ? 'One-to-one object count and IoU gates passed.' : `Expected ${expected.length} objects, matched ${matched.length}, predicted ${predicted.length}; inspect missed/extra objects.` }
+}
+
+/** Maximum-weight rectangular assignment, returning only real row/column pairs. */
+function hungarianMax(weights: readonly (readonly number[])[]): Array<[number, number]> {
+  const rows = weights.length, cols = weights[0]?.length ?? 0
+  if (!rows || !cols) return []
+  if (rows <= cols) {
+    const assignment = hungarianMin(weights.map((row) => row.map((value) => 1 - value)))
+    return assignment.map(([row, col]) => [row, col])
+  }
+  const transposed = Array.from({ length: cols }, (_, col) => Array.from({ length: rows }, (_, row) => 1 - weights[row][col]))
+  return hungarianMin(transposed).map(([col, row]) => [row, col])
+}
+
+// cp-algorithms' O(n^2 m) potentials implementation for min-cost assignment.
+function hungarianMin(cost: readonly (readonly number[])[]): Array<[number, number]> {
+  const n = cost.length, m = cost[0]?.length ?? 0
+  const u = new Array(n + 1).fill(0), v = new Array(m + 1).fill(0), p = new Array(m + 1).fill(0), way = new Array(m + 1).fill(0)
+  for (let i = 1; i <= n; i++) {
+    p[0] = i; let j0 = 0; const minv = new Array(m + 1).fill(Infinity), used = new Array(m + 1).fill(false)
+    do {
+      used[j0] = true; const i0 = p[j0]; let delta = Infinity, j1 = 0
+      for (let j = 1; j <= m; j++) if (!used[j]) { const cur = cost[i0 - 1][j - 1] - u[i0] - v[j]; if (cur < minv[j]) { minv[j] = cur; way[j] = j0 }; if (minv[j] < delta) { delta = minv[j]; j1 = j } }
+      for (let j = 0; j <= m; j++) { if (used[j]) { u[p[j]] += delta; v[j] -= delta } else minv[j] -= delta }
+      j0 = j1
+    } while (p[j0] !== 0)
+    do { const j1 = way[j0]; p[j0] = p[j1]; j0 = j1 } while (j0 !== 0)
+  }
+  const result: Array<[number, number]> = []
+  for (let j = 1; j <= m; j++) if (p[j] !== 0) result.push([p[j] - 1, j - 1])
+  return result
 }
 
 export function maskIou(a: ArrayLike<number>, b: ArrayLike<number>): number {

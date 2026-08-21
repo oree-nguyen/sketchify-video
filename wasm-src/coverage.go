@@ -19,11 +19,9 @@ func ExclusiveObjectBlocks(proposals []Block, rgba []byte, w, h int, settings Se
 		if len(pixels) < settings.MinBlockInk {
 			continue
 		}
+		// BBox and centroid are derived from the final exclusive mask. Proposal
+		// geometry is evidence for graph selection, never an ownership shortcut.
 		block := blockFromPixels(pixels, rgba, w, settings)
-		// Preserve proposal geometry for camera framing. Pixels remain the
-		// exclusive ownership mask used by the renderer.
-		block.BBox = proposal.BBox
-		block.CentroidX, block.CentroidY = proposal.CentroidX, proposal.CentroidY
 		block.Kind = proposal.Kind
 		out = append(out, block)
 	}

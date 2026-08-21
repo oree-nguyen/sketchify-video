@@ -22,4 +22,13 @@ describe('V2 one-to-one segmentation evaluator', () => {
     const result = evaluateEditorialObjects([object(1, 0, 0, 20, 20), object(2, 30, 0, 20, 20)], [{ id: 'left', bbox: { x: 0, y: 0, w: 20, h: 20 } }, { id: 'right', bbox: { x: 30, y: 0, w: 20, h: 20 } }])
     expect(result.passed).toBe(true)
   })
+
+  it('uses a global one-to-one assignment instead of greedy edge order', () => {
+    const result = evaluateEditorialObjects(
+      [object(1, 0, 0, 10, 10), object(2, 8, 0, 10, 10)],
+      [{ id: 'left', bbox: { x: 0, y: 0, w: 18, h: 10 } }, { id: 'right', bbox: { x: 8, y: 0, w: 10, h: 10 } }],
+      { minBoxIou: .2 },
+    )
+    expect(result.matched).toHaveLength(2)
+  })
 })

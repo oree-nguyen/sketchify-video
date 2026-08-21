@@ -1,0 +1,10 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "type":"object",
+  "required":["schemaVersion","coordinateSpace","fixtures"],
+  "properties": {
+    "schemaVersion":{"const":2},
+    "coordinateSpace":{"const":"normalized"},
+    "fixtures":{"type":"object"}
+  }
+}

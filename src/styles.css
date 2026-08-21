@@ -232,6 +232,7 @@ button:disabled { opacity: .45; }
 .transition-option small { color: #8493a0; margin-top: 3px; font-size: 10px; }
 
 .empty-objects { margin: 8px 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.algorithm-warning { margin: 4px 0; color: #fbbf24; font-size: 10px; }
 .object-group-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0 8px; padding: 7px 8px; border: 1px solid #31401d; border-radius: 8px; background: #111a0d; color: #aebba5; font-size: 10px; }
 .object-group-toolbar button { padding: 5px 9px; border: 1px solid var(--accent-track); border-radius: 7px; background: #18270d; color: var(--accent-strong); font-size: 10px; }
 .object-group-toolbar button:hover:not(:disabled) { border-color: var(--accent); box-shadow: 0 0 12px #84cc1640; }

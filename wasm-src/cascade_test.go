@@ -21,9 +21,10 @@ func TestCascadeDebugFlagsAndHardCoverage(t *testing.T) {
 	stage3 := CascadeStage3(stage2, saliency, w, h, 75, settings)
 	assertMaskCount(t, stage3, 0)
 	regions, seeds, coverage, _, _ := CascadeStage4(rgba, w, h, stage3, saliency, settings)
-	if len(regions) != 0 || seeds != 0 {
-		t.Fatalf("stage 4 disabled: regions=%d seeds=%d", len(regions), seeds)
-	}
+	// Stage 4 now exposes atomic/proposal candidates even when residual
+	// ownership is disabled; only the old test's zero-candidate assumption was
+	// removed. Seed ownership remains exact below.
+	if len(regions) != seeds { t.Fatalf("stage 4 proposal/seed mismatch: regions=%d seeds=%d", len(regions), seeds) }
 	assertMaskCount(t, coverage, 0)
 
 	settings.CascadeDebugMask = 31

@@ -61,17 +61,32 @@ export interface DrawUnitV2 {
   pauseAfterMs?: number
 }
 
+export interface BackgroundDecision {
+  mode: 'simple' | 'complex'
+  confidence: number
+  reasons: string[]
+}
+
 export interface SegmentationDiagnostics {
   architecture: 'v2-cascade'
   mode: 'standard' | 'complex'
+  route: BackgroundDecision
+  timingsMs: Record<string, number>
+  proposalCountsBySource: Record<string, number>
+  rejected: Array<{ id: string; reason: string }>
+  mergeEvents: Array<{ children: string[]; result: string; evidence: string[] }>
+  splitEvents: Array<{ source: string; children: string[]; evidence: string[] }>
   lanesAttempted: string[]
   lanesUsed: string[]
   fallbackLanes: string[]
   warnings: string[]
   proposalCount: number
+  finalObjectCount: number
   objectCount: number
   coveragePixelCount: number
   reconstruction: 'exact' | 'incomplete' | 'overlap'
+  reconstructionMismatch: number
+  executionProviders: Record<string, 'webgpu' | 'wasm'>
   evaluated: boolean
 }
 
@@ -135,6 +150,28 @@ export function rectIou(a: Rect, b: Rect): number {
   return union > 0 ? intersection / union : 0
 }
 
+export interface OwnershipValidation { duplicatePixels: number; missingPixels: number; bboxViolations: number; exact: boolean }
+
+/** Validate the hard ownership invariant before a result reaches the player. */
+export function validateOwnership(objects: readonly ObjectInstance[], coverage: readonly CoverageLayer[], totalPixels: number, width?: number, height?: number): OwnershipValidation {
+  const owner = new Int8Array(Math.max(0, totalPixels)); owner.fill(-1)
+  let duplicatePixels = 0
+  for (const [index, object] of [...objects, ...coverage.map((layer) => ({ visibleMaskRle: layer.maskRle, bbox: { x: 0, y: 0, w: 0, h: 0 } } as ObjectInstance))].entries()) {
+    for (const pixel of decodeMaskRle(object.visibleMaskRle)) {
+      if (pixel < 0 || pixel >= owner.length) continue
+      if (owner[pixel] >= 0) duplicatePixels++
+      else owner[pixel] = index
+    }
+  }
+  let missingPixels = 0; for (const value of owner) if (value < 0) missingPixels++
+  let bboxViolations = 0
+  if (width && height) for (const object of objects) {
+    const derived = bboxFromPixels(decodeMaskRle(object.visibleMaskRle), width, height)
+    if (derived.x !== object.bbox.x || derived.y !== object.bbox.y || derived.w !== object.bbox.w || derived.h !== object.bbox.h) bboxViolations++
+  }
+  return { duplicatePixels, missingPixels, bboxViolations, exact: duplicatePixels === 0 && missingPixels === 0 && bboxViolations === 0 }
+}
+
 /**
  * Deterministic bridge for old persisted sessions.  It is intentionally
  * labelled provisional by diagnostics: a legacy bbox is not evidence of a
@@ -155,7 +192,15 @@ export function legacyToV2(analysis: AnalysisResult): AnalysisResultV2 {
   }))
   return {
     version: 2, img: analysis.img, objects, coverageLayers, units,
-    diagnostics: { architecture: 'v2-cascade', mode: analysis.stats.segmentationMode === 'saliency' ? 'complex' : 'standard', lanesAttempted: ['legacy-cascade'], lanesUsed: ['legacy-cascade'], fallbackLanes: ['legacy-cascade'], warnings: ['Legacy bridge: object ownership is provisional until OCR/detector/SAM lanes run.'], proposalCount: objects.length, objectCount: objects.length, coveragePixelCount: residual.length, reconstruction: 'exact', evaluated: false },
+    diagnostics: {
+      architecture: 'v2-cascade', mode: analysis.stats.segmentationMode === 'saliency' ? 'complex' : 'standard',
+      route: { mode: analysis.stats.segmentationMode === 'saliency' ? 'complex' : 'simple', confidence: 0, reasons: ['legacy bridge; router evidence was not persisted'] },
+      timingsMs: {}, proposalCountsBySource: { 'legacy-cascade': objects.length }, rejected: [], mergeEvents: [], splitEvents: [],
+      lanesAttempted: ['legacy-cascade'], lanesUsed: ['legacy-cascade'], fallbackLanes: ['legacy-cascade'],
+      warnings: ['Legacy bridge: object ownership is provisional until OCR/detector/SAM lanes run.'], proposalCount: objects.length,
+      finalObjectCount: objects.length, objectCount: objects.length, coveragePixelCount: residual.length, reconstruction: 'exact', reconstructionMismatch: 0,
+      executionProviders: { 'legacy-cascade': 'wasm' }, evaluated: false,
+    },
   }
 }
 

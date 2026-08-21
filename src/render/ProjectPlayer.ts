@@ -5,6 +5,7 @@ import type { Analysis } from '../wasm/wasmClient'
 import { Player } from './Player'
 import { buildSubtitleCues } from '../subtitles/subtitleTimeline'
 import { drawSubtitleOverlay } from './subtitleRenderer'
+import { materializeAnalysisUnits } from '../segmentation/materialize'
 
 export interface ProjectPlayResult {
   elapsedMs: number
@@ -64,7 +65,7 @@ export class ProjectPlayer {
       const nextHalf = nextTransitionHalf(this.project.frames, segment.frameIndex)
       const playableDuration = Math.max(0.001, segment.durationSec - previousHalf - nextHalf)
       const naturalDrawDuration = frameDrawDurationSec(frame)
-      const timedAnalysis = retimeAnalysisForFrame(this.analyses[frame.id], frame)
+      const timedAnalysis = materializeAnalysisUnits(retimeAnalysisForFrame(this.analyses[frame.id], frame))
       const pauseDuration = analysisPauseDurationSec(timedAnalysis)
       const drawDuration = Math.min(naturalDrawDuration, Math.max(0.001, playableDuration - pauseDuration))
       const holdDuration = Math.max(0, playableDuration - drawDuration - pauseDuration)
