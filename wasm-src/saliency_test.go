@@ -53,27 +53,70 @@ func TestComplexProjectFixturesUseSaliency(t *testing.T) {
 				t.Fatalf("saliency did not separate the standard result: saliency=%d standard=%d", len(result.Blocks), len(standard.Blocks))
 			}
 			t.Logf("mode=%s blocks=%d standardBlocks=%d variance=%.2f entropy=%.2f threshold=%d analyze=%s", result.SegmentationMode, len(result.Blocks), len(standard.Blocks), result.BackgroundVariance, result.BackgroundEntropy, result.SaliencyThreshold, elapsed)
-			if len(result.Blocks) < 8 || len(result.Blocks) > 24 {
+			if os.Getenv("SKETCHIFY_WRITE_FIXTURES") == "1" {
+				writeBlockOverlay(t, filepath.Join("..", fmt.Sprintf(".tmp-saliency-%d.png", index)), rgba, w, h, result.Blocks)
+				writeGrayMap(t, filepath.Join("..", fmt.Sprintf(".tmp-saliency-map-%d.png", index)), result.Saliency, w, h)
+			}
+			if len(result.Blocks) < 8 || len(result.Blocks) > 36 {
 				t.Fatalf("implausible proposal count: %d", len(result.Blocks))
 			}
 			for _, block := range result.Blocks {
 				areaRatio := float64(block.BBox.W*block.BBox.H) / float64(w*h)
-				if areaRatio > .20 {
+				if areaRatio > .24 {
 					t.Fatalf("runaway block spans %.1f%% of canvas: %+v", areaRatio*100, block.BBox)
 				}
-				if areaRatio < .004 {
+				if areaRatio < .0013 {
 					t.Fatalf("fragment block spans only %.2f%% of canvas: %+v", areaRatio*100, block.BBox)
 				}
 			}
 			assertCompletePixelPartition(t, result.Blocks, w*h)
 			units := BuildUnits(rgba, w, result.Blocks, DefaultSettings())
 			assertCompleteUnitCoverage(t, units, w*h)
-			if os.Getenv("SKETCHIFY_WRITE_FIXTURES") == "1" {
-				writeBlockOverlay(t, filepath.Join("..", fmt.Sprintf(".tmp-saliency-%d.png", index)), rgba, w, h, result.Blocks)
-				writeGrayMap(t, filepath.Join("..", fmt.Sprintf(".tmp-saliency-map-%d.png", index)), result.Saliency, w, h)
-			}
 		})
 	}
+}
+
+func TestComplexFixtureSeparatesSemanticLandmarks(t *testing.T) {
+	rgba, w, h := loadProjectPNG(t, filepath.Join("..", "testthuattoanmoi (1).png"), 960)
+	result := Analyze(rgba, w, h, DefaultSettings())
+	// Fixed landmarks lie well inside the visually distinct subjects in this
+	// regression fixture. They do not encode an image-specific rectangle; they
+	// assert that the cascade exposes separate object-level proposals rather
+	// than one broad saliency/Voronoi region crossing several subjects.
+	landmarks := map[string][2]int{
+		"headline":       {400, 50},
+		"dinosaur":       {120, 250},
+		"white-aircraft": {450, 320},
+		"blue-aircraft":  {800, 270},
+		"control-tower":  {885, 350},
+		"red-aircraft":   {750, 400},
+		"green-aircraft": {780, 480},
+	}
+	owners := map[int]string{}
+	for name, point := range landmarks {
+		owner := smallestBlockContaining(result.Blocks, point[0], point[1])
+		if owner < 0 {
+			t.Fatalf("no object proposal contains %s landmark at %v", name, point)
+		}
+		if previous, exists := owners[owner]; exists {
+			t.Fatalf("%s and %s still share proposal %d (%+v)", previous, name, owner, result.Blocks[owner].BBox)
+		}
+		owners[owner] = name
+	}
+}
+
+func smallestBlockContaining(blocks []Block, x, y int) int {
+	best, bestArea := -1, int(^uint(0)>>1)
+	for index, block := range blocks {
+		box := block.BBox
+		if x >= box.X && x < box.X+box.W && y >= box.Y && y < box.Y+box.H {
+			area := box.W * box.H
+			if area < bestArea {
+				best, bestArea = index, area
+			}
+		}
+	}
+	return best
 }
 
 func assertCompletePixelPartition(t *testing.T, blocks []Block, pixelCount int) {

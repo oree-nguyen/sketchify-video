@@ -20,7 +20,7 @@ func TestCascadeDebugFlagsAndHardCoverage(t *testing.T) {
 	assertMaskCount(t, stage2, 0)
 	stage3 := CascadeStage3(stage2, saliency, w, h, 75, settings)
 	assertMaskCount(t, stage3, 0)
-	regions, seeds, coverage := CascadeStage4(rgba, w, h, stage3, saliency, settings)
+	regions, seeds, coverage, _, _ := CascadeStage4(rgba, w, h, stage3, saliency, settings)
 	if len(regions) != 0 || seeds != 0 {
 		t.Fatalf("stage 4 disabled: regions=%d seeds=%d", len(regions), seeds)
 	}
@@ -30,7 +30,7 @@ func TestCascadeDebugFlagsAndHardCoverage(t *testing.T) {
 	stage1 = CascadeStage1(rgba, w, h, settings, EstimateBackground(rgba, w, h))
 	stage2 = CascadeStage2(stage1, saliency, PercentileThreshold(saliency, 75), settings)
 	stage3 = CascadeStage3(stage2, saliency, w, h, 75, settings)
-	regions, seeds, coverage = CascadeStage4(rgba, w, h, stage3, saliency, settings)
+	regions, seeds, coverage, _, _ = CascadeStage4(rgba, w, h, stage3, saliency, settings)
 	assertMaskCount(t, coverage, w*h)
 	regions = CascadeStage5(regions, seeds, rgba, w, h, settings)
 	total := 0

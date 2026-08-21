@@ -94,17 +94,19 @@ func percentileRect(values []uint8, w, h, x0, y0, x1, y1 int, percentile float64
 
 // CascadeStage4 reuses MedianCut and Components to partition every pixel not
 // owned by a saliency seed. Each output pixel appears in exactly one region.
-func CascadeStage4(rgba []byte, w, h int, stage3, saliency []uint8, settings Settings) ([][]int, int, []uint8) {
-	regions := SaliencyMarkerGroups(stage3, saliency, w, h, settings.MinBlockInk)
-	seedBlocks := make([]Block, 0, len(regions))
-	for _, pixels := range regions {
-		seedBlocks = append(seedBlocks, blockFromPixels(pixels, rgba, w, settings))
-	}
-	seedBlocks = MergeOverlappingSaliencyBlocks(seedBlocks, rgba, w, h, settings)
-	seedBlocks = MergeTextBlocks(seedBlocks, rgba, w, h)
-	regions = regions[:0]
+func CascadeStage4(rgba []byte, w, h int, stage3, saliency []uint8, settings Settings) ([][]int, int, []uint8, []Rect, [][2]float64) {
+	seedBlocks := CombinedObjectBlocks(rgba, w, h, stage3, saliency, settings)
+	seedBlocks = SplitOversizedSaliencyBlocks(seedBlocks, rgba, w, h, settings)
+	// CombinedObjectBlocks has already reconciled overlapping saliency, colour
+	// and text proposals. Running the old pairwise merge here again collapses
+	// semantic objects back into broad colour/saliency regions.
+	regions := make([][]int, 0, len(seedBlocks))
+	coreBoxes := make([]Rect, 0, len(seedBlocks))
+	coreCentroids := make([][2]float64, 0, len(seedBlocks))
 	for _, block := range seedBlocks {
 		regions = append(regions, block.Pixels)
+		coreBoxes = append(coreBoxes, block.BBox)
+		coreCentroids = append(coreCentroids, [2]float64{block.CentroidX, block.CentroidY})
 	}
 	seedCount := len(regions)
 	owner := make([]int, w*h)
@@ -117,7 +119,7 @@ func CascadeStage4(rgba []byte, w, h int, stage3, saliency []uint8, settings Set
 		}
 	}
 	if settings.CascadeDebugMask&cascadeStage4Flag == 0 {
-		return regions, seedCount, append([]uint8(nil), stage3...)
+		return regions, seedCount, append([]uint8(nil), stage3...), coreBoxes, coreCentroids
 	}
 	samples := make([]Color, 0, 30000)
 	stride := maxInt(1, (w*h-lenAssigned(owner))/30000)
@@ -228,7 +230,7 @@ func CascadeStage4(rgba []byte, w, h int, stage3, saliency []uint8, settings Set
 	for i := range full {
 		full[i] = 1
 	}
-	return regions, seedCount, full
+	return regions, seedCount, full, coreBoxes, coreCentroids
 }
 
 func smoothPaletteCodes(codes []uint8, owner []int, w, h, cell, paletteSize int) []uint8 {

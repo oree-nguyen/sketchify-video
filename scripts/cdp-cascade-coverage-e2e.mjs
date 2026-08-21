@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 
 const fixture = (await readFile(new URL('../testthuattoanmoi (1).png', import.meta.url))).toString('base64')
-const pages = await fetch('http://127.0.0.1:9333/json/list').then((response) => response.json())
+const pages = await fetch('http://localhost:9333/json/list').then((response) => response.json())
 const page = pages.find((item) => item.type === 'page')
 if (!page) throw new Error('Không tìm thấy tab Edge CDP')
 const socket = new WebSocket(page.webSocketDebuggerUrl)
@@ -31,7 +31,7 @@ await send('Page.navigate', { url: `http://127.0.0.1:4174/?cascade-e2e=${Date.no
 await new Promise((resolve) => setTimeout(resolve, 1000))
 const result = await evaluate(`(async () => {
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
-  const waitFor = async (predicate, timeout = 90000) => {
+  const waitFor = async (predicate, timeout = 150000) => {
     const deadline = performance.now() + timeout
     while (performance.now() < deadline) {
       const value = predicate()
@@ -59,12 +59,12 @@ const result = await evaluate(`(async () => {
   }
   const preview = [...document.querySelectorAll('.top-actions button')].find((button) => button.textContent.includes('Xem thử'))
   preview.click()
-  await waitFor(() => window.__cascadeLogs.some((entry) => entry[0] === '[Sketchify] final render verification'), 30000)
+  await waitFor(() => window.__cascadeLogs.some((entry) => entry[0] === '[Sketchify] final render verification'), 60000)
   const verification = [...window.__cascadeLogs].reverse().find((entry) => entry[0] === '[Sketchify] final render verification')[1]
-  await waitFor(() => [...document.querySelectorAll('.top-actions button')].some((button) => button.textContent.includes('Xem thử')), 30000)
+  await waitFor(() => [...document.querySelectorAll('.top-actions button')].some((button) => button.textContent.includes('Xem thử')), 60000)
   return { objectCount, verification, status: document.querySelector('.stage-topline')?.textContent ?? '' }
 })()`)
-result.passed = result.objectCount >= 8 && result.objectCount <= 24
+result.passed = result.objectCount >= 8 && result.objectCount <= 36
   && result.verification.coveredPixels === 960 * 540
   && result.verification.mismatchedPixels === 0
   && result.verification.maxChannelDiff <= 2

@@ -12,11 +12,15 @@ func SplitOversizedSaliencyBlocks(blocks []Block, rgba []byte, w, h int, setting
 }
 
 func splitSaliencyBlock(block Block, rgba []byte, w, h int, settings Settings, depth int) []Block {
-	if depth >= 3 || len(block.Pixels) < settings.MinBlockInk*2 {
+	if depth >= 1 || len(block.Pixels) < settings.MinBlockInk*2 {
 		return []Block{block}
 	}
 	boxArea := block.BBox.W * block.BBox.H
-	if boxArea < w*h/4 && block.BBox.W < w*3/5 && block.BBox.H < h*3/5 {
+	// Complex illustrations often place several long objects on adjacent rows.
+	// A proposal does not need to cover a quarter of the canvas to be oversized:
+	// a wide 10%-height strip can still contain two separate aircraft. Small,
+	// compact proposals remain untouched.
+	if boxArea < w*h*8/100 && !(block.BBox.W > w/4 && block.BBox.H > h*15/100) {
 		return []Block{block}
 	}
 	type candidate struct {
@@ -81,6 +85,10 @@ func splitSaliencyBlock(block Block, rgba []byte, w, h int, settings Settings, d
 	}
 	first := blockFromPixels(firstPixels, rgba, w, settings)
 	second := blockFromPixels(secondPixels, rgba, w, settings)
+	minimumChildArea := w * h / 700
+	if first.BBox.W*first.BBox.H < minimumChildArea || second.BBox.W*second.BBox.H < minimumChildArea {
+		return []Block{block}
+	}
 	return append(splitSaliencyBlock(first, rgba, w, h, settings, depth+1), splitSaliencyBlock(second, rgba, w, h, settings, depth+1)...)
 }
 

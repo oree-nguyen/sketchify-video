@@ -89,7 +89,7 @@ Nhánh nền phức tạp dùng thuật toán Hou–Zhang thuần toán học:
 
 Thử nghiệm cho thấy phép `ink_old OR saliency` nguyên văn vẫn giữ toàn bộ vùng “khác một màu nền” và làm các ảnh sân bay thành một Block khổng lồ. Vì vậy nhánh phức tạp giữ phần Sobel của mask cũ, nhưng chỉ nhận cạnh nằm trong vùng hỗ trợ saliency, cộng với lõi saliency vượt ngưỡng. Bộ lọc trung bình trên mặt phẳng FFT dùng biên tuần hoàn; kẹp biên như ảnh không gian sẽ sinh một dải chéo giả sau IFFT.
 
-Các cực đại saliency sau đó được khử cực đại lân cận để tạo seed thưa. Pixel chỉ được gán cho seed gần nhất khi đồng thời thuộc ink mask và nằm trong **support band saliency**; vì thế nền texture không còn bị chia thành các ô Voronoi phủ kín canvas. Các cell thực sự chồng lấn mạnh theo cả hai chiều mới được gộp, đồng thời union box phải đủ đặc. Việc chỉ chạm cạnh hoặc nối bằng một dải mảnh không đủ điều kiện, nên tránh được chaining. Nếu ảnh không sinh được seed hợp lệ, pipeline mới fallback sang CCL. Nhánh nền đơn giản vẫn dùng đúng pipeline chuẩn cũ.
+Nhánh nền phức tạp không còn dùng cực đại saliency làm tâm Voronoi. Cách cũ có thể gán các mảnh của nhiều vật thể cho cùng một tâm chỉ vì chúng ở gần nhau, tạo ra các vùng rộng cắt ngang máy bay, nhân vật và chữ. Thay vào đó, `CombinedObjectBlocks` sinh proposal từ phân cụm màu toàn cục rồi mới CCL không gian; saliency và Sobel chỉ bỏ phiếu mức “giống vật thể” cho từng proposal. Các proposal chữ được ghép theo baseline, proposal dài được giữ theo từng dải dọc ảnh, và proposal quá rộng được cắt tại valley của projection profile. Nhánh nền đơn giản vẫn dùng đúng pipeline chuẩn cũ và không gọi kiến trúc này.
 
 ### 3.3 Cascade năm tầng và hợp đồng phủ pixel
 
@@ -98,12 +98,12 @@ Với nền phức tạp, pipeline chạy tuần tự năm hàm độc lập tro
 1. `CascadeStage1`: Sobel và sai khác với màu nền viền.
 2. `CascadeStage2`: OR thêm saliency theo percentile toàn ảnh.
 3. `CascadeStage3`: cửa sổ 64×64, bước 48 px (overlap 16 px); percentile cục bộ được tính bằng histogram 256 mức rồi nội suy song tuyến thành threshold map liên tục.
-4. `CascadeStage4`: lõi saliency tạo seed vật thể. Phần chưa có chủ được median-cut toàn cục thành tám mã màu, làm mượt trên cell 4×4 rồi chạy lại đúng `Components` 4-láng giềng cho từng mã.
-5. `CascadeStage5`: vùng màu kề nhau được so theo chênh lệch màu và tỉ lệ diện tích, gộp tối đa ba vòng. Các vùng phủ kỹ thuật còn lại được gán cho seed phù hợp nhất; chúng không trở thành hàng trăm vật thể trong UI.
+4. `CascadeStage4`: `CombinedObjectBlocks` kết hợp median-cut toàn cục, CCL theo từng mã màu, ghép chữ theo baseline, spectral-residual saliency và Sobel objectness. NMS hai chiều loại proposal trùng; quota theo dải ngang/dọc giữ lại vật thể ở mọi khu vực ảnh; projection-valley tách proposal chứa nhiều vật thể. Bounding box proposal và pixel ownership được lưu riêng để khung không co lại sau khi giải quyết chồng lấn.
+5. `CascadeStage5`: pixel kỹ thuật/nền còn lại được gán đúng một lần cho proposal phù hợp nhất theo màu và khoảng cách. Việc này bảo đảm render cuối đủ ảnh gốc nhưng không làm thay đổi bounding box ngữ nghĩa đã chốt ở Tầng 4.
 
 `cascadeDebugMask` dùng năm bit thấp để bật/tắt riêng từng tầng khi debug; mặc định là `31` (đủ năm tầng). `cascadeColorClusters` mặc định là `8` và bị giới hạn 2–16.
 
-Trong nhánh phức tạp, `AnalysisResult.Ink` sau Tầng 4 có giá trị 1 tại toàn bộ pixel. Quan trọng hơn, hợp các `Block.Pixels` tạo thành một partition chính xác: mỗi pixel xuất hiện đúng một lần. `BuildUnits` tiếp tục bảo toàn partition này nên ảnh kết thúc có đủ 100% pixel gốc. Bounding box hiển thị/camera vẫn lấy từ lõi saliency; pixel nền được gán bổ sung không làm khung vật thể phình ra toàn canvas.
+Trong nhánh phức tạp, `AnalysisResult.Ink` sau Tầng 4 có giá trị 1 tại toàn bộ pixel. Quan trọng hơn, hợp các `Block.Pixels` tạo thành một partition chính xác: mỗi pixel xuất hiện đúng một lần. `BuildUnits` tiếp tục bảo toàn partition này nên ảnh kết thúc có đủ 100% pixel gốc. Bounding box hiển thị/camera lấy từ proposal đa tín hiệu đã chọn; pixel nền được gán bổ sung không làm khung vật thể phình ra hoặc co lại.
 
 ## 4. Tạo Ink mask
 

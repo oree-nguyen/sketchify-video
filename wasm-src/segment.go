@@ -86,18 +86,7 @@ func Analyze(rgba []byte, w, h int, s Settings) AnalysisResult {
 		saliencyThreshold = PercentileThreshold(saliency, s.SaliencyPercentile)
 		stage2 := CascadeStage2(fine, saliency, saliencyThreshold, s)
 		stage3 := CascadeStage3(stage2, saliency, w, h, s.SaliencyPercentile, s)
-		regions, seedCount, coverage := CascadeStage4(rgba, w, h, stage3, saliency, s)
-		coreBoxes := make([]Rect, minInt(seedCount, len(regions)))
-		coreCentroids := make([][2]float64, len(coreBoxes))
-		for i := range coreBoxes {
-			coreBoxes[i] = bboxForPixels(regions[i], w)
-			x, y := 0.0, 0.0
-			for _, pixel := range regions[i] {
-				x += float64(pixel % w)
-				y += float64(pixel / w)
-			}
-			coreCentroids[i] = [2]float64{x / float64(len(regions[i])), y / float64(len(regions[i]))}
-		}
+		regions, seedCount, coverage, coreBoxes, coreCentroids := CascadeStage4(rgba, w, h, stage3, saliency, s)
 		regions = CascadeStage5(regions, seedCount, rgba, w, h, s)
 		out := make([]Block, 0, len(regions))
 		for i, pixels := range regions {
