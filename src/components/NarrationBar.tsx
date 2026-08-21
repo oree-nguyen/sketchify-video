@@ -37,7 +37,7 @@ export function NarrationBar({ frame, busy, progress, create, onClose }: Props) 
         const nextLanguage = event.target.value as TtsLanguage
         setLanguage(nextLanguage)
         setVoiceId(DEFAULT_VOICE_BY_LANGUAGE[nextLanguage])
-      }}><option value="vi">Tiếng Việt</option><option value="en">English</option></select>
+      }}><option value="vi">Tiếng Việt</option><option value="en">English</option><option value="ko">한국어</option></select>
       <select aria-label="Giọng đọc" value={voiceId} onChange={(event) => setVoiceId(event.target.value)}>{voices.map((voice) => <option key={voice.id} value={voice.id}>{voice.displayName}</option>)}</select>
       <label className="speech-speed">Tốc độ <input aria-label="Tốc độ giọng đọc" type="number" min="0.25" max="4" step="0.1" inputMode="decimal" value={speed} onChange={(event) => setSpeed(Math.max(.25, Math.min(4, Number(event.target.value) || 1)))} /><span>×</span></label>
       <button className="export" disabled={busy || !text.trim()} onClick={() => create(text, voiceId, speed)}>{busy ? status : frame.narration?.audioBuffer ? 'Tạo lại audio' : 'Tạo audio ▶'}</button>

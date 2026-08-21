@@ -113,11 +113,17 @@ export const TTS_VOICES: Voice[] = [
     sourceCheckpoint: 'en_GB-jenny_dioco-medium', piperId: 'en_GB-jenny_dioco-medium', sampleRate: 22050,
     modelUrls: piper('en/en_GB/jenny_dioco/medium', 'en_GB-jenny_dioco-medium'),
   },
+  {
+    id: 'ko-standard', displayName: 'Giọng Hàn tiêu chuẩn', language: 'ko', engine: 'piper',
+    sourceCheckpoint: 'ko_KR-kss-medium', piperId: 'ko_KR-kss-medium', sampleRate: 22050,
+    modelUrls: piper('ko/ko_KR/kss/medium', 'ko_KR-kss-medium'),
+  },
 ]
 
 export const DEFAULT_VOICE_BY_LANGUAGE: Record<TtsLanguage, string> = {
   vi: 'vi-default',
   en: 'en-warm-female',
+  ko: 'ko-standard',
 }
 
 export function voiceById(id: string): Voice {

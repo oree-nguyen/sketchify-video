@@ -23,6 +23,14 @@ The voice model and configuration are distributed from `public/voices/` and fetc
 - The pronunciation dictionary in `public/tts/cmudict-0.7b` is the Carnegie Mellon Pronouncing Dictionary and retains its permissive CMU notice.
 - Matcha-TTS-VIVOS is intentionally not registered because the referenced public checkpoint no longer exists.
 
+## Korean voice
+
+- Voice: `ko_KR-kss-medium` from `rhasspy/piper-voices`.
+- The published folder provides the ONNX model and its JSON configuration; the model is downloaded lazily from the published repository when the user generates Korean narration.
+- Model repository license: MIT. The KSS dataset and any downstream use remain subject to their respective source terms.
+- Source: https://huggingface.co/rhasspy/piper-voices/tree/main/ko/ko_KR/kss/medium
+- No Korean Matcha-TTS entry is registered: the official Matcha code has an ONNX export route, but no specific public Korean checkpoint with an independently verified distributable license and browser-compatible export was available for this release.
+
 ## MC. Ngọc Ngân
 
 - Checkpoint: `doof-ferb/matcha_ngngngan`, epoch 420, exported locally to separate acoustic and HiFi-GAN ONNX graphs.

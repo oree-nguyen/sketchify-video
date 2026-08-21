@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { TTS_VOICES, ttsAssetBaseUrl, ttsAssetUrl } from './voices'
+import { DEFAULT_VOICE_BY_LANGUAGE, TTS_VOICES, ttsAssetBaseUrl, ttsAssetUrl } from './voices'
 
 describe('TTS voice registry', () => {
   it('keeps deployment assets under the GitHub Pages repository path', () => {
@@ -22,6 +22,23 @@ describe('TTS voice registry', () => {
       'vi_VN-vivos-x_low',
       'vi_VN-25hours_single-low',
     ])
+  })
+
+  it('registers the verified Korean voice with a friendly UI label only', () => {
+    const korean = TTS_VOICES.filter((voice) => voice.language === 'ko')
+    expect(korean).toHaveLength(1)
+    expect(korean[0]).toMatchObject({
+      id: 'ko-standard',
+      displayName: 'Giọng Hàn tiêu chuẩn',
+      engine: 'piper',
+      sourceCheckpoint: 'ko_KR-kss-medium',
+      sampleRate: 22050,
+    })
+    expect(korean[0].modelUrls).toEqual({
+      onnx: expect.stringContaining('/ko/ko_KR/kss/medium/ko_KR-kss-medium.onnx'),
+      config: expect.stringContaining('/ko/ko_KR/kss/medium/ko_KR-kss-medium.onnx.json'),
+    })
+    expect(DEFAULT_VOICE_BY_LANGUAGE.ko).toBe('ko-standard')
   })
 
   it('registers MC Ngọc Ngân and the ten named VieNeu presets', () => {

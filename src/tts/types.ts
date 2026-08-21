@@ -1,5 +1,7 @@
 export type TtsEngine = 'piper' | 'matcha' | 'vieneu'
-export type TtsLanguage = 'vi' | 'en'
+// The UI exposes language and a friendly voice name only. The selected
+// language is deliberately kept separate from the internal engine router.
+export type TtsLanguage = 'vi' | 'en' | 'ko'
 
 export interface Voice {
   id: string
