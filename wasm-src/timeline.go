@@ -13,6 +13,7 @@ func BuildUnits(rgba []byte, w int, blocks []Block, s Settings) []DrawUnit {
 		u = mergeUnassignedPixels(u, b, rgba, w)
 		for i := range u {
 			u[i].BlockID = b.ID
+			u[i].Role = "object"
 		}
 		out = append(out, u...)
 	}
@@ -30,6 +31,40 @@ func BuildUnits(rgba []byte, w int, blocks []Block, s Settings) []DrawUnit {
 		out[i].T1 = at / total
 	}
 	return out
+}
+
+// BuildUnitsWithCoverage keeps object units and residual coverage units in the
+// same deterministic timeline. Coverage has no block owner (BlockID=-1), so
+// camera/object settings can never accidentally treat it as an editorial
+// object, while Player still reveals every source pixel exactly once.
+func BuildUnitsWithCoverage(rgba []byte, w int, blocks []Block, coveragePixels []int, s Settings) []DrawUnit {
+	out := BuildUnits(rgba, w, blocks, s)
+	if len(coveragePixels) > 0 {
+		out = append(out, DrawUnit{
+			Type: "area", Role: "coverage", BlockID: -1,
+			Pixels: append([]int(nil), coveragePixels...),
+			Color:  averagePixelColor(rgba, coveragePixels), BBox: bboxForPixels(coveragePixels, w),
+			Cost: mathSqrt(float64(len(coveragePixels))) * 2,
+		})
+	}
+	return normalizeUnitTimes(out)
+}
+
+func normalizeUnitTimes(units []DrawUnit) []DrawUnit {
+	total := 0.0
+	for _, u := range units {
+		total += u.Cost
+	}
+	if total == 0 {
+		return units
+	}
+	at := 0.0
+	for i := range units {
+		units[i].T0 = at / total
+		at += units[i].Cost
+		units[i].T1 = at / total
+	}
+	return units
 }
 
 // mergeUnassignedPixels bảo đảm Tầng 3 không làm mất pixel khi loại region nhỏ.

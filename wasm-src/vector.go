@@ -4,7 +4,10 @@ import "math"
 
 type Point struct{ X, Y float64 }
 type DrawUnit struct {
-	Type    string
+	Type string
+	// Role is "object" for editorial units and "coverage" for residual image
+	// pixels that must be rendered without becoming a fake object block.
+	Role    string
 	BlockID int
 	Path    []Point
 	Pixels  []int

@@ -21,6 +21,10 @@ type AnalysisResult struct {
 	BackgroundVariance   float64
 	BackgroundEntropy    float64
 	SaliencyThreshold    uint8
+	// CoveragePixels are residual pixels deliberately kept outside editorial
+	// object blocks. They are still rendered, but never become a fake object.
+	CoveragePixels []int
+	Architecture   string
 }
 
 // Components dùng flood-fill stack 4-láng giềng, không đệ quy để tránh tràn stack.
@@ -86,26 +90,20 @@ func Analyze(rgba []byte, w, h int, s Settings) AnalysisResult {
 		saliencyThreshold = PercentileThreshold(saliency, s.SaliencyPercentile)
 		stage2 := CascadeStage2(fine, saliency, saliencyThreshold, s)
 		stage3 := CascadeStage3(stage2, saliency, w, h, s.SaliencyPercentile, s)
-		regions, seedCount, coverage, coreBoxes, coreCentroids := CascadeStage4(rgba, w, h, stage3, saliency, s)
-		regions = CascadeStage5(regions, seedCount, rgba, w, h, s)
-		out := make([]Block, 0, len(regions))
-		for i, pixels := range regions {
-			if len(pixels) == 0 {
-				continue
-			}
-			block := blockFromPixels(pixels, rgba, w, s)
-			if i < len(coreBoxes) {
-				block.BBox = coreBoxes[i]
-				block.CentroidX, block.CentroidY = coreCentroids[i][0], coreCentroids[i][1]
-				block.Kind = ClassifyBlock(rgba, w, block, s)
-			}
-			out = append(out, block)
-		}
+		// Complex mode now stops at editorial candidates. The old CascadeStage4
+		// and Stage5 partition every residual pixel into arbitrary Voronoi-like
+		// regions; that made background texture look like dozens of objects.
+		// Keep those stages available for diagnostics/tests, but do not use them
+		// as final owners here.
+		proposals := CombinedObjectBlocks(rgba, w, h, stage3, saliency, s)
+		proposals = SplitOversizedSaliencyBlocks(proposals, rgba, w, h, s)
+		out := ExclusiveObjectBlocks(proposals, rgba, w, h, s)
+		coveragePixels := ResidualCoveragePixels(out, w, h)
 		OrderBlocks(out, s.OrderMode, s.RowThresholdFactor)
 		for i := range out {
 			out[i].ID = i
 		}
-		return AnalysisResult{Background: bg, Blocks: out, EffectiveMergeRadius: 0, OpeningApplied: false, Ink: coverage, Saliency: saliency, SegmentationMode: mode, BackgroundVariance: variance, BackgroundEntropy: entropy, SaliencyThreshold: saliencyThreshold}
+		return AnalysisResult{Background: bg, Blocks: out, EffectiveMergeRadius: 0, OpeningApplied: false, Ink: fullMask(w, h), Saliency: saliency, SegmentationMode: mode, BackgroundVariance: variance, BackgroundEntropy: entropy, SaliencyThreshold: saliencyThreshold, CoveragePixels: coveragePixels, Architecture: "legacy-candidates+coverage"}
 	}
 	fine = DilateSquare(ErodeSquare(fine, w, h, 1), w, h, 1)
 	// rgba đã được resize về ảnh làm việc trước khi vào WASM. Scale bán kính theo
@@ -166,7 +164,7 @@ func Analyze(rgba []byte, w, h int, s Settings) AnalysisResult {
 	for i := range out {
 		out[i].ID = i
 	}
-	return AnalysisResult{Background: bg, Blocks: out, EffectiveMergeRadius: r, OpeningApplied: true, Ink: fine, Saliency: saliency, SegmentationMode: mode, BackgroundVariance: variance, BackgroundEntropy: entropy, SaliencyThreshold: saliencyThreshold}
+	return AnalysisResult{Background: bg, Blocks: out, EffectiveMergeRadius: r, OpeningApplied: true, Ink: fine, Saliency: saliency, SegmentationMode: mode, BackgroundVariance: variance, BackgroundEntropy: entropy, SaliencyThreshold: saliencyThreshold, Architecture: "legacy"}
 }
 
 func mathMax(a, b float64) float64 {

@@ -78,7 +78,9 @@ export class Player {
           break
         }
         const scheduledActive=elapsed<drawMs?activeScheduledUnit(schedule,elapsed):undefined
-        const active=scheduledActive&&usesStandardReveal(this.options.objectSettingsByBlockId?.[scheduledActive.unit.blockId])?scheduledActive.unit:undefined
+        // Residual coverage is a render layer, never an editorial object: it
+        // must not move the hand or create a camera focus span.
+        const active=scheduledActive&&scheduledActive.unit.role!=='coverage'&&scheduledActive.unit.blockId>=0&&usesStandardReveal(this.options.objectSettingsByBlockId?.[scheduledActive.unit.blockId])?scheduledActive.unit:undefined
         const crop=cameraAt(camera?.keys??[{t:0,crop:{x:0,y:0,w,h},easing:'linear'}],progress)
         const sampleBucket=Math.min(9,Math.floor(progress*10))
         if(active&&sampleBucket!==cameraSampleBucket){

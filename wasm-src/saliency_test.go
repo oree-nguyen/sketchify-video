@@ -69,8 +69,8 @@ func TestComplexProjectFixturesUseSaliency(t *testing.T) {
 					t.Fatalf("fragment block spans only %.2f%% of canvas: %+v", areaRatio*100, block.BBox)
 				}
 			}
-			assertCompletePixelPartition(t, result.Blocks, w*h)
-			units := BuildUnits(rgba, w, result.Blocks, DefaultSettings())
+			assertObjectAndResidualCoverage(t, result.Blocks, result.CoveragePixels, w*h)
+			units := BuildUnitsWithCoverage(rgba, w, result.Blocks, result.CoveragePixels, DefaultSettings())
 			assertCompleteUnitCoverage(t, units, w*h)
 		})
 	}
@@ -119,7 +119,7 @@ func smallestBlockContaining(blocks []Block, x, y int) int {
 	return best
 }
 
-func assertCompletePixelPartition(t *testing.T, blocks []Block, pixelCount int) {
+func assertObjectAndResidualCoverage(t *testing.T, blocks []Block, residual []int, pixelCount int) {
 	t.Helper()
 	seen := make([]uint8, pixelCount)
 	for _, block := range blocks {
@@ -129,6 +129,12 @@ func assertCompletePixelPartition(t *testing.T, blocks []Block, pixelCount int) 
 			}
 			seen[pixel]++
 		}
+	}
+	for _, pixel := range residual {
+		if pixel < 0 || pixel >= pixelCount {
+			t.Fatalf("coverage pixel outside image: %d", pixel)
+		}
+		seen[pixel]++
 	}
 	for pixel, count := range seen {
 		if count != 1 {

@@ -3,7 +3,10 @@
 // Sketchify Video chạy thuật toán xử lý ảnh trong WebAssembly, không mở server.
 package main
 
-import "syscall/js"
+import (
+	"sort"
+	"syscall/js"
+)
 
 func main() {
 	// API chỉ nhận TypedArray; ảnh không bao giờ rời khỏi bộ nhớ trình duyệt.
@@ -29,10 +32,18 @@ func analyzeJS(_ js.Value, args []js.Value) interface{} {
 	if settings.OrderMode == "custom" && len(settings.CustomOrder) > 0 {
 		result.Blocks = applyCustomOrder(result.Blocks, settings.CustomOrder)
 	}
-	units := BuildUnits(rgba, width, result.Blocks, settings)
+	units := BuildUnitsWithCoverage(rgba, width, result.Blocks, result.CoveragePixels, settings)
 	blocks := make([]interface{}, len(result.Blocks))
 	for i, b := range result.Blocks {
 		blocks[i] = map[string]interface{}{"id": b.ID, "bbox": rectJS(b.BBox), "centroid": map[string]interface{}{"x": b.CentroidX, "y": b.CentroidY}, "inkArea": b.InkArea, "pixels": intsJS(b.Pixels), "kind": b.Kind}
+	}
+	objects := make([]interface{}, len(result.Blocks))
+	for i, b := range result.Blocks {
+		objects[i] = map[string]interface{}{"id": b.ID, "role": "thing", "bbox": rectJS(b.BBox), "visibleMaskRle": intsJS(maskRLE(b.Pixels)), "centroid": map[string]interface{}{"x": b.CentroidX, "y": b.CentroidY}, "confidence": 0.0, "children": []interface{}{}, "mergeHistory": nil, "kind": b.Kind, "provenance": []interface{}{map[string]interface{}{"source": "legacy-cascade", "note": "provisional complex-branch candidate"}}}
+	}
+	coverageLayers := []interface{}{}
+	if len(result.CoveragePixels) > 0 {
+		coverageLayers = append(coverageLayers, map[string]interface{}{"id": "coverage:residual", "maskRle": intsJS(maskRLE(result.CoveragePixels)), "revealPolicy": "base", "reason": "residual"})
 	}
 	jsUnits := make([]interface{}, len(units))
 	for i, u := range units {
@@ -40,9 +51,25 @@ func analyzeJS(_ js.Value, args []js.Value) interface{} {
 		for _, p := range u.Path {
 			path = append(path, p.X, p.Y)
 		}
-		jsUnits[i] = map[string]interface{}{"type": u.Type, "blockId": u.BlockID, "bbox": rectJS(u.BBox), "pixels": intsJS(u.Pixels), "path": floatsJS(path), "color": intsJS([]int{u.Color.R, u.Color.G, u.Color.B}), "cost": u.Cost, "t0": u.T0, "t1": u.T1}
+		role := u.Role
+		if role == "" {
+			role = "object"
+			if u.BlockID < 0 {
+				role = "coverage"
+			}
+		}
+		jsUnits[i] = map[string]interface{}{"type": u.Type, "role": role, "blockId": u.BlockID, "bbox": rectJS(u.BBox), "pixels": intsJS(u.Pixels), "path": floatsJS(path), "color": intsJS([]int{u.Color.R, u.Color.G, u.Color.B}), "cost": u.Cost, "t0": u.T0, "t1": u.T1}
 	}
-	return map[string]interface{}{"img": map[string]interface{}{"rgba": bytesJS(rgba), "gray": bytesJS(Gray(rgba)), "ink": bytesJS(result.Ink), "saliency": bytesJS(result.Saliency), "w": width, "h": height, "bg": intsJS([]int{result.Background.R, result.Background.G, result.Background.B})}, "blocks": blocks, "units": jsUnits, "stats": map[string]interface{}{"blocks": len(blocks), "units": len(units), "mergeRadiusConfigured": settings.MergeRadius, "mergeRadiusApplied": result.EffectiveMergeRadius, "workingWidthActual": width, "openingApplied": result.OpeningApplied, "segmentationMode": result.SegmentationMode, "backgroundVariance": result.BackgroundVariance, "backgroundEntropy": result.BackgroundEntropy, "saliencyThreshold": result.SaliencyThreshold}}
+	architecture := result.Architecture
+	if architecture == "" {
+		architecture = "legacy"
+	}
+	reconstruction := "incomplete"
+	if result.SegmentationMode == "saliency" {
+		reconstruction = "exact" // objects + residual coverage form the full frame.
+	}
+	diagnostics := map[string]interface{}{"architecture": "v2-cascade", "mode": map[bool]string{true: "complex", false: "standard"}[result.SegmentationMode == "saliency"], "lanesAttempted": []interface{}{"legacy-cascade"}, "lanesUsed": []interface{}{"legacy-cascade"}, "fallbackLanes": []interface{}{"legacy-cascade"}, "warnings": []interface{}{"Legacy candidate adapter is active; OCR/detector/SAM lanes are not configured yet."}, "proposalCount": len(result.Blocks), "objectCount": len(result.Blocks), "coveragePixelCount": len(result.CoveragePixels), "reconstruction": reconstruction, "evaluated": false}
+	return map[string]interface{}{"version": 2, "img": map[string]interface{}{"rgba": bytesJS(rgba), "gray": bytesJS(Gray(rgba)), "ink": bytesJS(result.Ink), "saliency": bytesJS(result.Saliency), "w": width, "h": height, "bg": intsJS([]int{result.Background.R, result.Background.G, result.Background.B})}, "blocks": blocks, "objects": objects, "coverageLayers": coverageLayers, "units": jsUnits, "diagnostics": diagnostics, "stats": map[string]interface{}{"blocks": len(blocks), "units": len(units), "objectBlocks": len(blocks), "coveragePixels": len(result.CoveragePixels), "architecture": architecture, "mergeRadiusConfigured": settings.MergeRadius, "mergeRadiusApplied": result.EffectiveMergeRadius, "workingWidthActual": width, "openingApplied": result.OpeningApplied, "segmentationMode": result.SegmentationMode, "backgroundVariance": result.BackgroundVariance, "backgroundEntropy": result.BackgroundEntropy, "saliencyThreshold": result.SaliencyThreshold}}
 }
 
 func rectJS(r Rect) map[string]interface{} {
@@ -54,6 +81,25 @@ func intsJS(values []int) []interface{} {
 		out[i] = v
 	}
 	return out
+}
+
+func maskRLE(values []int) []int {
+	if len(values) == 0 {
+		return nil
+	}
+	copyValues := append([]int(nil), values...)
+	sort.Ints(copyValues)
+	runs := make([]int, 0)
+	start, previous := copyValues[0], copyValues[0]
+	for _, value := range copyValues[1:] {
+		if value == previous || value == previous+1 {
+			previous = value
+			continue
+		}
+		runs = append(runs, start, previous-start+1)
+		start, previous = value, value
+	}
+	return append(runs, start, previous-start+1)
 }
 func floatsJS(values []float64) []interface{} {
 	out := make([]interface{}, len(values))
