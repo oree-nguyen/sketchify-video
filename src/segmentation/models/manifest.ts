@@ -11,8 +11,9 @@ export interface SegmentationModelManifest {
   enabled: boolean
   inputName?: string
   outputNames?: string[]
-  outputLayout?: 'yolov8-seg'
+  outputLayout?: 'yolov8-seg' | 'dbnet'
   inputSize?: number
+  inputLongSide?: number
   classCount?: number
 }
 
@@ -26,6 +27,13 @@ export const SEGMENTATION_MODEL_MANIFEST: readonly SegmentationModelManifest[] =
     bytes: 13834790, license: 'AGPL-3.0', opset: 19, enabled: true,
     inputName: 'input', outputNames: ['output', 'onnx::Shape_356'], outputLayout: 'yolov8-seg', inputSize: 640, classCount: 80,
   },
+  {
+    id: 'paddleocrv5-mobile-det', lane: 'text',
+    url: 'segmentation/ppocrv5_mobile_det.onnx',
+    sha256: 'a431985659dc921974177a95adcfbb90fd9e51989a5e04d70d0b75f597b6e61d',
+    bytes: 4826518, license: 'Apache-2.0', opset: 11, enabled: true,
+    inputName: 'x', outputNames: ['fetch_name_0'], outputLayout: 'dbnet', inputLongSide: 960,
+  },
 ]
 
 export function validateModelManifest(entry: SegmentationModelManifest): string[] {
@@ -37,6 +45,7 @@ export function validateModelManifest(entry: SegmentationModelManifest): string[
   if (!entry.license.trim()) errors.push('license is required')
   if (!Number.isInteger(entry.opset) || entry.opset < 1) errors.push('opset must be a positive integer')
   if (entry.outputLayout === 'yolov8-seg' && (entry.inputSize ?? 0) <= 0) errors.push('YOLO layout requires inputSize')
+  if (entry.outputLayout === 'dbnet' && (entry.inputLongSide ?? 0) <= 0) errors.push('DBNet layout requires inputLongSide')
   return errors
 }
 

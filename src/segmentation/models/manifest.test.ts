@@ -15,4 +15,12 @@ describe('segmentation model manifest', () => {
     expect(model?.inputName).toBe('input')
     expect(model?.bytes).toBe(13_834_790)
   })
+
+  it('ships the verified PP-OCR DB detector metadata', () => {
+    const model = SEGMENTATION_MODEL_MANIFEST.find((entry) => entry.id === 'paddleocrv5-mobile-det')
+    expect(model).toBeDefined()
+    expect(validateModelManifest(model!)).toEqual([])
+    expect(model?.outputLayout).toBe('dbnet')
+    expect(model?.bytes).toBe(4_826_518)
+  })
 })
