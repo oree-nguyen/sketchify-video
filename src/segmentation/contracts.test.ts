@@ -8,4 +8,12 @@ describe('V2 ownership contract', () => {
     expect(result.duplicatePixels).toBe(1)
     expect(result.exact).toBe(false)
   })
+
+  it('fails closed for out-of-range pixels', () => {
+    const object = (maskRle: Uint32Array) => ({ id: 1, role: 'thing' as const, bbox: { x: 0, y: 0, w: 1, h: 1 }, visibleMaskRle: maskRle, centroid: { x: 0, y: 0 }, confidence: 1, children: [], mergeHistory: null, kind: 'vector' as const, provenance: [] })
+    const result = validateOwnership([object(encodeMaskRle([0, 1, 2, 3, 4]))], [], 4, 2, 2)
+    expect(result.invalidPixels).toBe(1)
+    expect(result.missingPixels).toBe(0)
+    expect(result.exact).toBe(false)
+  })
 })

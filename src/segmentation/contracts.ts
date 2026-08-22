@@ -150,15 +150,15 @@ export function rectIou(a: Rect, b: Rect): number {
   return union > 0 ? intersection / union : 0
 }
 
-export interface OwnershipValidation { duplicatePixels: number; missingPixels: number; bboxViolations: number; exact: boolean }
+export interface OwnershipValidation { duplicatePixels: number; missingPixels: number; invalidPixels: number; bboxViolations: number; exact: boolean }
 
 /** Validate the hard ownership invariant before a result reaches the player. */
 export function validateOwnership(objects: readonly ObjectInstance[], coverage: readonly CoverageLayer[], totalPixels: number, width?: number, height?: number): OwnershipValidation {
   const owner = new Int8Array(Math.max(0, totalPixels)); owner.fill(-1)
-  let duplicatePixels = 0
+  let duplicatePixels = 0, invalidPixels = 0
   for (const [index, object] of [...objects, ...coverage.map((layer) => ({ visibleMaskRle: layer.maskRle, bbox: { x: 0, y: 0, w: 0, h: 0 } } as ObjectInstance))].entries()) {
     for (const pixel of decodeMaskRle(object.visibleMaskRle)) {
-      if (pixel < 0 || pixel >= owner.length) continue
+      if (pixel < 0 || pixel >= owner.length) { invalidPixels++; continue }
       if (owner[pixel] >= 0) duplicatePixels++
       else owner[pixel] = index
     }
@@ -169,7 +169,7 @@ export function validateOwnership(objects: readonly ObjectInstance[], coverage: 
     const derived = bboxFromPixels(decodeMaskRle(object.visibleMaskRle), width, height)
     if (derived.x !== object.bbox.x || derived.y !== object.bbox.y || derived.w !== object.bbox.w || derived.h !== object.bbox.h) bboxViolations++
   }
-  return { duplicatePixels, missingPixels, bboxViolations, exact: duplicatePixels === 0 && missingPixels === 0 && bboxViolations === 0 }
+  return { duplicatePixels, missingPixels, invalidPixels, bboxViolations, exact: duplicatePixels === 0 && missingPixels === 0 && invalidPixels === 0 && bboxViolations === 0 }
 }
 
 /**
@@ -190,6 +190,9 @@ export function legacyToV2(analysis: AnalysisResult): AnalysisResultV2 {
     pixelsRle: encodeMaskRle(unit.pixels), path: Float32Array.from(unit.path), color: unit.color, bbox: unit.bbox,
     cost: unit.cost, t0: unit.t0, t1: unit.t1, pauseAfterMs: unit.pauseAfterMs,
   }))
+  const ownership = validateOwnership(objects, coverageLayers, total)
+  const reconstruction = ownership.exact ? 'exact' : ownership.duplicatePixels || ownership.invalidPixels ? 'overlap' : 'incomplete'
+  const ownershipWarning = ownership.exact ? [] : [`Legacy ownership invariant failed: ${ownership.duplicatePixels} duplicate, ${ownership.invalidPixels} invalid, ${ownership.missingPixels} missing pixels.`]
   return {
     version: 2, img: analysis.img, objects, coverageLayers, units,
     diagnostics: {
@@ -197,8 +200,8 @@ export function legacyToV2(analysis: AnalysisResult): AnalysisResultV2 {
       route: { mode: analysis.stats.segmentationMode === 'saliency' ? 'complex' : 'simple', confidence: 0, reasons: ['legacy bridge; router evidence was not persisted'] },
       timingsMs: {}, proposalCountsBySource: { 'legacy-cascade': objects.length }, rejected: [], mergeEvents: [], splitEvents: [],
       lanesAttempted: ['legacy-cascade'], lanesUsed: ['legacy-cascade'], fallbackLanes: ['legacy-cascade'],
-      warnings: ['Legacy bridge: object ownership is provisional until OCR/detector/SAM lanes run.'], proposalCount: objects.length,
-      finalObjectCount: objects.length, objectCount: objects.length, coveragePixelCount: residual.length, reconstruction: 'exact', reconstructionMismatch: 0,
+      warnings: ['Legacy bridge: object ownership is provisional until OCR/detector/SAM lanes run.', ...ownershipWarning], proposalCount: objects.length,
+      finalObjectCount: objects.length, objectCount: objects.length, coveragePixelCount: residual.length, reconstruction, reconstructionMismatch: ownership.duplicatePixels + ownership.invalidPixels + ownership.missingPixels,
       executionProviders: { 'legacy-cascade': 'wasm' }, evaluated: false,
     },
   }
