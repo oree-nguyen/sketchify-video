@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "a252566",
+  "fixture": "testthuattoanmoi (1).png",
+  "expectedCount": 16,
+  "observed": {
+    "objectCount": 61,
+    "blockCount": 61,
+    "overlayCount": 61,
+    "reconstructionMismatch": 0,
+    "fallbackLanes": ["ocr-text-lines", "known-object-detector", "unknown-object-sam"],
+    "wasmAnalyzeMs": 107924.1
+  },
+  "passed": false,
+  "reason": "The a252566 result over-segments the editorial fixture (61 predictions for 16 expected objects). This artifact is the baseline gate and must remain a failure."
+}
