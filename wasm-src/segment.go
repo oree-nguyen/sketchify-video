@@ -183,7 +183,8 @@ func Analyze(rgba []byte, w, h int, s Settings) AnalysisResult {
 	for i := range out {
 		out[i].ID = i
 	}
-	return AnalysisResult{Background: bg, Blocks: out, EffectiveMergeRadius: r, OpeningApplied: true, Ink: fine, Saliency: saliency, SegmentationMode: mode, BackgroundVariance: variance, BackgroundEntropy: entropy, SaliencyThreshold: saliencyThreshold, Architecture: "legacy"}
+	coveragePixels := ResidualCoveragePixels(out, w, h)
+	return AnalysisResult{Background: bg, Blocks: out, EffectiveMergeRadius: r, OpeningApplied: true, Ink: fine, Saliency: saliency, SegmentationMode: mode, BackgroundVariance: variance, BackgroundEntropy: entropy, SaliencyThreshold: saliencyThreshold, CoveragePixels: coveragePixels, Architecture: "legacy"}
 }
 
 func mathMax(a, b float64) float64 {

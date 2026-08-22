@@ -52,6 +52,45 @@ func ResidualCoveragePixels(blocks []Block, w, h int) []int {
 	return residual
 }
 
+// OwnershipStats is the WASM-side reconstruction gate.  Object masks and the
+// residual coverage mask must partition the source image exactly once; a
+// count-only check is not sufficient because overlaps can hide missing pixels.
+type OwnershipStats struct {
+	Duplicate int
+	Missing   int
+	Invalid   int
+}
+
+func CheckOwnership(blocks []Block, coverage []int, totalPixels int) OwnershipStats {
+	owner := make([]uint8, totalPixels)
+	stats := OwnershipStats{}
+	claim := func(pixel int) {
+		if pixel < 0 || pixel >= totalPixels {
+			stats.Invalid++
+			return
+		}
+		if owner[pixel] != 0 {
+			stats.Duplicate++
+			return
+		}
+		owner[pixel] = 1
+	}
+	for _, block := range blocks {
+		for _, pixel := range block.Pixels {
+			claim(pixel)
+		}
+	}
+	for _, pixel := range coverage {
+		claim(pixel)
+	}
+	for _, claimed := range owner {
+		if claimed == 0 {
+			stats.Missing++
+		}
+	}
+	return stats
+}
+
 func fullMask(width, height int) []uint8 {
 	mask := make([]uint8, width*height)
 	for i := range mask {

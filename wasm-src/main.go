@@ -75,8 +75,9 @@ func analyzeJS(_ js.Value, args []js.Value) interface{} {
 	if architecture == "" {
 		architecture = "legacy"
 	}
+	ownership := CheckOwnership(result.Blocks, result.CoveragePixels, width*height)
 	reconstruction := "incomplete"
-	if result.SegmentationMode == "saliency" {
+	if ownership.Duplicate == 0 && ownership.Missing == 0 && ownership.Invalid == 0 {
 		reconstruction = "exact" // objects + residual coverage form the full frame.
 	}
 	routeMode := "simple"
@@ -86,7 +87,7 @@ func analyzeJS(_ js.Value, args []js.Value) interface{} {
 	routeReasons := []interface{}{"background variance and entropy evaluated in Go/WASM"}
 	if routeMode == "complex" { routeReasons = append(routeReasons, "complex branch selected because texture/entropy exceeded thresholds") } else { routeReasons = append(routeReasons, "simple branch selected because background is low-variance") }
 	warnings := []interface{}{"Semantic OCR/detector/SAM model lanes are not configured; legacy candidates are provisional and must not be used as benchmark evidence."}
-	if reconstruction != "exact" { warnings = append(warnings, "Reconstruction is incomplete because standard mode has no explicit coverage owner.") }
+	if reconstruction != "exact" { warnings = append(warnings, "Ownership invariant failed: residual coverage does not partition the source image exactly.") }
 	diagnostics := map[string]interface{}{
 		"architecture": "v2-cascade", "mode": map[bool]string{true: "complex", false: "standard"}[result.SegmentationMode == "saliency"],
 		"route": map[string]interface{}{"mode": routeMode, "confidence": routeConfidence, "reasons": routeReasons},
@@ -95,7 +96,7 @@ func analyzeJS(_ js.Value, args []js.Value) interface{} {
 		"lanesAttempted": []interface{}{"legacy-cascade", "ocr", "known-object-detector", "unknown-object-sam"}, "lanesUsed": []interface{}{"legacy-cascade"},
 		"fallbackLanes": []interface{}{"ocr", "known-object-detector", "unknown-object-sam"}, "warnings": warnings,
 		"proposalCount": len(result.Blocks), "finalObjectCount": len(result.Blocks), "objectCount": len(result.Blocks), "coveragePixelCount": len(result.CoveragePixels),
-		"reconstruction": reconstruction, "reconstructionMismatch": 0, "executionProviders": map[string]interface{}{"go-cues": "wasm"}, "evaluated": false,
+		"reconstruction": reconstruction, "reconstructionMismatch": ownership.Duplicate + ownership.Missing + ownership.Invalid, "executionProviders": map[string]interface{}{"go-cues": "wasm"}, "evaluated": false,
 	}
 	return map[string]interface{}{"version": 2, "img": map[string]interface{}{"rgba": bytesJS(rgba), "gray": bytesJS(Gray(rgba)), "ink": bytesJS(result.Ink), "saliency": bytesJS(result.Saliency), "w": width, "h": height, "bg": intsJS([]int{result.Background.R, result.Background.G, result.Background.B})}, "blocks": blocks, "objects": objects, "coverageLayers": coverageLayers, "units": jsUnits, "unitsV2": unitsV2, "diagnostics": diagnostics, "stats": map[string]interface{}{"blocks": len(blocks), "units": len(units), "objectBlocks": len(blocks), "coveragePixels": len(result.CoveragePixels), "atomicRegions": result.AtomicRegionCount, "architecture": architecture, "mergeRadiusConfigured": settings.MergeRadius, "mergeRadiusApplied": result.EffectiveMergeRadius, "workingWidthActual": width, "openingApplied": result.OpeningApplied, "segmentationMode": result.SegmentationMode, "backgroundVariance": result.BackgroundVariance, "backgroundEntropy": result.BackgroundEntropy, "saliencyThreshold": result.SaliencyThreshold}}
 }

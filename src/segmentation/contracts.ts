@@ -154,7 +154,7 @@ export interface OwnershipValidation { duplicatePixels: number; missingPixels: n
 
 /** Validate the hard ownership invariant before a result reaches the player. */
 export function validateOwnership(objects: readonly ObjectInstance[], coverage: readonly CoverageLayer[], totalPixels: number, width?: number, height?: number): OwnershipValidation {
-  const owner = new Int8Array(Math.max(0, totalPixels)); owner.fill(-1)
+  const owner = new Int32Array(Math.max(0, totalPixels)); owner.fill(-1)
   let duplicatePixels = 0, invalidPixels = 0
   for (const [index, object] of [...objects, ...coverage.map((layer) => ({ visibleMaskRle: layer.maskRle, bbox: { x: 0, y: 0, w: 0, h: 0 } } as ObjectInstance))].entries()) {
     for (const pixel of decodeMaskRle(object.visibleMaskRle)) {
