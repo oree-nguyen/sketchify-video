@@ -32,7 +32,7 @@ export const SEGMENTATION_MODEL_MANIFEST: readonly SegmentationModelManifest[] =
     url: 'segmentation/ppocrv5_mobile_det.onnx',
     sha256: 'a431985659dc921974177a95adcfbb90fd9e51989a5e04d70d0b75f597b6e61d',
     bytes: 4826518, license: 'Apache-2.0', opset: 11, enabled: true,
-    inputName: 'x', outputNames: ['fetch_name_0'], outputLayout: 'dbnet', inputLongSide: 960,
+    inputName: 'x', outputNames: ['fetch_name_0'], outputLayout: 'dbnet', inputLongSide: 640,
   },
 ]
 

@@ -59,8 +59,8 @@ When enabling a model, record the exact artifact and license here:
 
 | Lane | Artifact | License | SHA-256 | Bytes | ONNX opset | Providers tested |
 |---|---|---|---|---:|---:|---|
-| OCR/text | `PaddlePaddle/PP-OCRv5_mobile_det` (`public/segmentation/ppocrv5_mobile_det.onnx`) | Apache-2.0 | `a431985659dc921974177a95adcfbb90fd9e51989a5e04d70d0b75f597b6e61d` | 4,826,518 | 11 | Python ORT CPU compatibility probe pending; browser WASM pending |
-| known-object detector | `mobilint/YOLOv8n-seg` (`public/segmentation/yolov8n-seg.onnx`) | AGPL-3.0 | `cb1e689c548b3fa019691c9c1762f38a76276981ce75d31f6c5aae396dbff78b` | 13,834,790 | 19 | Python ORT CPU compatibility probe passed; browser WASM/WebGPU pending |
+| OCR/text | `PaddlePaddle/PP-OCRv5_mobile_det` (`public/segmentation/ppocrv5_mobile_det.onnx`) | Apache-2.0 | `a431985659dc921974177a95adcfbb90fd9e51989a5e04d70d0b75f597b6e61d` | 4,826,518 | 11 | ORT Web WASM probe passed; latest 3.4s synthetic inference |
+| known-object detector | `mobilint/YOLOv8n-seg` (`public/segmentation/yolov8n-seg.onnx`) | AGPL-3.0 | `cb1e689c548b3fa019691c9c1762f38a76276981ce75d31f6c5aae396dbff78b` | 13,834,790 | 19 | ORT Web WASM probe passed; latest 9.6s synthetic inference; performance gate fails; WebGPU pending |
 | MobileSAM refiner | not bundled | Apache-2.0 upstream; artifact pending | pending | pending | pending | pending |
 
 The classical Go/WASM cues (foreground, saliency, colour clustering, CCL,
