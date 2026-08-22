@@ -13,6 +13,7 @@
     "test:cascade-browser": "node scripts/cdp-cascade-coverage-e2e.mjs",
     "test:segmentation-evaluate": "node scripts/segmentation-evaluate.mjs",
     "test:phase0-baseline": "node scripts/phase0-baseline-gate.mjs",
+    "test:phase0": "npm run test:segmentation-evaluate && npm run test:phase0-baseline",
     "test:segmentation-ort-web": "node scripts/probe-segmentation-ort-web.mjs",
     "test:project-browser": "node scripts/cdp-project-playback-e2e.mjs",
     "test:project-transition-browser": "node scripts/cdp-project-transition-e2e.mjs",
